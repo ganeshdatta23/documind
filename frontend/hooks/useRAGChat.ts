@@ -1,12 +1,13 @@
 /**
- * useRAGChat — SSE streaming chat hook for RAG conversations.
- * Streams tokens from the backend, accumulates the response, and persists messages.
+ * useRAGChat — SSE streaming chat hook.
+ * Uses streamChatMessage generator from lib/api.ts.
  */
 "use client";
 
 import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Citation, Message } from "@/lib/api";
+import { streamChatMessage } from "@/lib/api";
+import type { Citation } from "@/lib/api-client";
 import { conversationKeys } from "./useConversations";
 
 export interface StreamingMessage {
@@ -28,106 +29,66 @@ export function useRAGChat(conversationId: string) {
     async (content: string) => {
       if (!content.trim() || isSending) return;
 
-      // Cancel any in-flight request
       abortRef.current?.abort();
       abortRef.current = new AbortController();
 
       setError(null);
       setIsSending(true);
 
-      // Optimistically add user message
-      const userMsg: StreamingMessage = {
-        role: "user", content, citations: [], isStreaming: false,
-      };
-      setMessages((prev) => [...prev, userMsg]);
-
-      // Placeholder for streaming assistant message
-      const assistantMsg: StreamingMessage = {
-        role: "assistant", content: "", citations: [], isStreaming: true,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      // Optimistic user message
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content, citations: [], isStreaming: false },
+        { role: "assistant", content: "", citations: [], isStreaming: true },
+      ]);
 
       try {
-        const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/conversations/${conversationId}/messages`;
-        const token = typeof window !== "undefined" ? (window as any).__AUTH_TOKEN__ : "";
-
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ content }),
-          signal: abortRef.current.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-
-        const reader = response.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
         let fullContent = "";
         let finalCitations: Citation[] = [];
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const blocks = buffer.split("\n\n");
-          buffer = blocks.pop() ?? "";
-
-          for (const block of blocks) {
-            if (!block.trim()) continue;
-            const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
-            const eventLine = block.split("\n").find((l) => l.startsWith("event:"));
-            if (!dataLine) continue;
-
-            const event = eventLine?.slice(6).trim();
-            const data = JSON.parse(dataLine.slice(5).trim());
-
-            if (event === "token") {
-              fullContent += data.token;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  ...updated[updated.length - 1],
-                  content: fullContent,
-                };
-                return updated;
-              });
-            } else if (event === "done") {
-              finalCitations = data.citations ?? [];
-              const latency = data.retrieval_latency_ms;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: data.answer || fullContent,
-                  citations: finalCitations,
-                  isStreaming: false,
-                  latency_ms: latency,
-                };
-                return updated;
-              });
-            }
+        for await (const event of streamChatMessage(
+          conversationId,
+          content,
+          abortRef.current.signal
+        )) {
+          if (event.event === "token") {
+            fullContent += event.data.token ?? "";
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                content: fullContent,
+              };
+              return updated;
+            });
+          } else if (event.event === "done") {
+            finalCitations = (event.data.citations as Citation[]) ?? [];
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                role: "assistant",
+                content: (event.data.answer as string) || fullContent,
+                citations: finalCitations,
+                isStreaming: false,
+                latency_ms: event.data.retrieval_latency_ms,
+              };
+              return updated;
+            });
+          } else if (event.event === "error") {
+            throw new Error((event.data.message as string) || "Stream error");
           }
         }
 
-        // Invalidate messages query to sync with backend
-        qc.invalidateQueries({
-          queryKey: conversationKeys.messages(conversationId),
-        });
+        qc.invalidateQueries({ queryKey: conversationKeys.messages(conversationId) });
       } catch (err: any) {
         if (err.name !== "AbortError") {
-          setError(err.message || "Something went wrong");
+          const msg = err.message || "Something went wrong";
+          setError(msg);
           setMessages((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...updated[updated.length - 1],
-              content: "Sorry, something went wrong. Please try again.",
+              content: "Sorry, an error occurred. Please try again.",
               isStreaming: false,
             };
             return updated;
@@ -144,13 +105,12 @@ export function useRAGChat(conversationId: string) {
     abortRef.current?.abort();
     setIsSending(false);
     setMessages((prev) => {
+      if (prev.length === 0) return prev;
       const updated = [...prev];
-      if (updated.length > 0) {
-        updated[updated.length - 1] = {
-          ...updated[updated.length - 1],
-          isStreaming: false,
-        };
-      }
+      updated[updated.length - 1] = {
+        ...updated[updated.length - 1],
+        isStreaming: false,
+      };
       return updated;
     });
   }, []);

@@ -2,11 +2,11 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useEffect, useState } from "react";
-import { Send, StopCircle, Plus, BookOpen, Loader2 } from "lucide-react";
+import { Send, StopCircle, Plus, BookOpen } from "lucide-react";
 import { useRAGChat } from "@/hooks/useRAGChat";
 import { useConversations, useCreateConversation } from "@/hooks/useConversations";
 import { formatRelativeTime, cn } from "@/lib/utils";
-import type { Citation } from "@/lib/api";
+import type { Citation } from "@/lib/api-client";
 
 // ─── Citation Chip ─────────────────────────────────────────────────────────
 

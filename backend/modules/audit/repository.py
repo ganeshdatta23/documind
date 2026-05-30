@@ -1,4 +1,4 @@
-"""Audit repository — append-only log writing and querying."""
+"""Audit repository — corrected to use AuditLog.metadata_ (ORM field name)."""
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -38,7 +38,7 @@ class AuditRepository:
             ip_address=ip_address,
             user_agent=user_agent,
             request_id=request_id,
-            metadata_=metadata or {},
+            metadata_=metadata or {},   # ORM maps metadata_ → "metadata" column
             status=status,
         )
         self.db.add(log)
@@ -69,7 +69,9 @@ class AuditRepository:
         if until:
             q = q.where(AuditLog.created_at <= until)
 
-        total = await self.db.scalar(select(func.count()).select_from(q.subquery()))
+        total = await self.db.scalar(
+            select(func.count()).select_from(q.subquery())
+        )
         result = await self.db.execute(
             q.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
         )

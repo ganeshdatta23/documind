@@ -1,5 +1,12 @@
+/**
+ * auth-store.ts — Zustand auth state with sessionStorage persistence.
+ *
+ * Token storage: in-memory only via window.__DOCUMIND_TOKEN__ (TOKEN_KEY).
+ * User metadata is persisted in sessionStorage (not the token).
+ */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { setToken, clearToken, TOKEN_KEY } from "@/lib/http-client";
 
 export interface AuthUser {
   id: string;
@@ -14,7 +21,6 @@ interface AuthState {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  // Actions
   setAuth: (user: AuthUser, token: string) => void;
   clearAuth: () => void;
   setLoading: (loading: boolean) => void;
@@ -28,17 +34,12 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
 
       setAuth: (user, token) => {
-        // Store token in-memory (not localStorage — XSS protection)
-        if (typeof window !== "undefined") {
-          (window as any).__AUTH_TOKEN__ = token;
-        }
+        setToken(token); // uses shared TOKEN_KEY via http-client
         set({ user, isAuthenticated: true, isLoading: false });
       },
 
       clearAuth: () => {
-        if (typeof window !== "undefined") {
-          (window as any).__AUTH_TOKEN__ = undefined;
-        }
+        clearToken();
         set({ user: null, isAuthenticated: false, isLoading: false });
       },
 
@@ -49,8 +50,15 @@ export const useAuthStore = create<AuthState>()(
       storage: createJSONStorage(() =>
         typeof window !== "undefined" ? sessionStorage : ({} as Storage)
       ),
-      // Only persist non-sensitive user data (NOT the access token)
-      partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
+      // Persist only non-sensitive data — token is in-memory only
+      partialize: (state) => ({
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+      }),
+      onRehydrateStorage: () => (state) => {
+        // After hydration, clear loading
+        state?.setLoading(false);
+      },
     }
   )
 );

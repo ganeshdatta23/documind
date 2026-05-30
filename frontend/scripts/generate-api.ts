@@ -2,44 +2,52 @@
 /**
  * DocuMind API Code Generator
  * ============================================================
- * Fetches /api/openapi.json from the backend and generates:
+ * Auto-runs before `npm run dev` and `npm run build` via npm lifecycle hooks.
  *
- *   lib/generated/
- *     schema.ts          ← All TypeScript types (via openapi-typescript)
- *     client.ts          ← Typed fetch API client (one function per operation)
- *
- *   hooks/generated/
- *     use{Tag}.ts        ← React Query hooks per OpenAPI tag
- *     index.ts           ← Barrel re-export
+ * Strategy (in order):
+ *   1. Try fetching live spec from --url (default: localhost:8000)
+ *   2. Fall back to saved lib/generated/openapi.json if present
+ *   3. If neither available, print warning and exit 0 (non-blocking)
  *
  * Usage:
- *   npm run generate-api                   (backend at localhost:8000)
- *   npm run generate-api -- --url http://staging.api.com
- *   npm run generate-api -- --file ./openapi.json
+ *   npm run generate-api                      # auto (backend at localhost:8000)
+ *   npm run generate-api -- --url http://...  # specific URL
+ *   npm run generate-api -- --file ./spec.json # specific file
+ *   npm run generate-api -- --safe            # never fail (used by predev)
  *
+ * Output:
+ *   lib/generated/openapi.json   (spec snapshot)
+ *   lib/generated/schema.ts      (all TypeScript types)
+ *   lib/generated/client.ts      (typed apiRequest wrappers per operation)
+ *   hooks/generated/use{Tag}.ts  (React Query useQuery/useMutation per tag)
+ *   hooks/generated/index.ts     (barrel re-export)
  * ============================================================
  */
 
 import fs from "fs";
 import path from "path";
-import https from "https";
 import http from "http";
+import https from "https";
 
-// ─── CLI Arguments ───────────────────────────────────────────────────────────
+// ─── CLI flags ────────────────────────────────────────────────────────────────
+
 const args = process.argv.slice(2);
 const getArg = (flag: string) => {
   const idx = args.indexOf(flag);
-  return idx !== -1 ? args[idx + 1] : null;
+  return idx !== -1 && args[idx + 1] ? args[idx + 1] : null;
 };
+const SAFE_MODE = args.includes("--safe");
 const API_URL = getArg("--url") ?? "http://localhost:8000";
 const LOCAL_FILE = getArg("--file");
 
-// ─── Output Paths ─────────────────────────────────────────────────────────────
+// ─── Paths ────────────────────────────────────────────────────────────────────
+
 const ROOT = path.resolve(__dirname, "..");
 const GENERATED_LIB = path.join(ROOT, "lib", "generated");
 const GENERATED_HOOKS = path.join(ROOT, "hooks", "generated");
+const SNAPSHOT_PATH = path.join(GENERATED_LIB, "openapi.json");
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
 function mkdirp(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -47,111 +55,120 @@ function mkdirp(dir: string) {
 
 function write(filePath: string, content: string) {
   fs.writeFileSync(filePath, content, "utf-8");
-  console.log(`  ✅ ${path.relative(ROOT, filePath)}`);
+  console.log(`  ✅  ${path.relative(ROOT, filePath)}`);
 }
 
-function fetchJson(url: string): Promise<any> {
+function fetchJson(url: string, timeoutMs = 5000): Promise<any> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
-    client
-      .get(url, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          try { resolve(JSON.parse(data)); }
-          catch (e) { reject(new Error(`Failed to parse JSON from ${url}`)); }
-        });
-      })
-      .on("error", reject);
+    const req = client.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+        return;
+      }
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch {
+          reject(new Error("Invalid JSON in response"));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Timeout fetching ${url}`));
+    });
   });
 }
 
-/** Convert an OpenAPI path like /api/v1/documents/{id} → camelCase operationId */
-function pathToOperationName(method: string, path: string): string {
-  const parts = path
-    .replace(/^\/api\/v\d+\//, "")
-    .split("/")
-    .map((p) =>
-      p.startsWith("{")
-        ? "By" + p.slice(1, -1).charAt(0).toUpperCase() + p.slice(2, -1)
-        : p.charAt(0).toUpperCase() + p.slice(1)
-    );
-  return method.toLowerCase() + parts.join("");
-}
+// ─── Schema → TypeScript ──────────────────────────────────────────────────────
 
-/** Derive a resource tag from a path segment */
-function getResourceFromPath(p: string): string {
-  const seg = p.replace(/^\/api\/v\d+\//, "").split("/")[0];
-  return seg.charAt(0).toUpperCase() + seg.slice(1);
-}
-
-/** Map OpenAPI schema to TypeScript type string (simplified) */
-function schemaToTs(schema: any, indent = 0): string {
+function schemaToTs(schema: any, depth = 0): string {
   if (!schema) return "unknown";
-  const pad = "  ".repeat(indent);
-
   if (schema.$ref) {
-    const parts = schema.$ref.split("/");
-    return parts[parts.length - 1];
+    const name = schema.$ref.split("/").pop()!;
+    return name;
+  }
+  if (schema.anyOf || schema.oneOf) {
+    return (schema.anyOf ?? schema.oneOf)
+      .map((s: any) => schemaToTs(s, depth))
+      .join(" | ");
   }
   switch (schema.type) {
     case "string":
-      return schema.enum
-        ? schema.enum.map((e: string) => `"${e}"`).join(" | ")
-        : "string";
+      if (schema.enum)
+        return schema.enum.map((e: string) => `"${e}"`).join(" | ");
+      return schema.format === "date-time" ? "string" : "string";
     case "integer":
     case "number":
       return "number";
     case "boolean":
       return "boolean";
     case "array":
-      return `Array<${schemaToTs(schema.items, indent)}>`;
-    case "object":
+      return `Array<${schemaToTs(schema.items, depth)}>`;
+    case "object": {
       if (!schema.properties) return "Record<string, unknown>";
-      const props = Object.entries(schema.properties)
-        .map(([k, v]: [string, any]) => {
-          const required = schema.required?.includes(k) ? "" : "?";
-          const nullable = v.nullable ? " | null" : "";
-          return `${pad}  ${k}${required}: ${schemaToTs(v, indent + 1)}${nullable};`;
-        })
-        .join("\n");
-      return `{\n${props}\n${pad}}`;
+      const pad = "  ".repeat(depth + 1);
+      const fields = Object.entries<any>(schema.properties).map(([k, v]) => {
+        const opt = schema.required?.includes(k) ? "" : "?";
+        const nullable = v.nullable ? " | null" : "";
+        return `${pad}${k}${opt}: ${schemaToTs(v, depth + 1)}${nullable};`;
+      });
+      return `{\n${fields.join("\n")}\n${"  ".repeat(depth)}}`;
+    }
     default:
-      if (schema.anyOf || schema.oneOf) {
-        const variants = (schema.anyOf ?? schema.oneOf).map((s: any) =>
-          schemaToTs(s, indent)
-        );
-        return variants.join(" | ");
-      }
       return "unknown";
   }
 }
 
-// ─── Type Generator ──────────────────────────────────────────────────────────
-
 function generateSchemaTs(spec: any): string {
   const schemas = spec.components?.schemas ?? {};
   const lines: string[] = [
-    "// AUTO-GENERATED — do not edit manually",
-    "// Run: npm run generate-api",
+    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
+    `// Source: ${spec.info?.title} v${spec.info?.version}`,
+    `// Generated: ${new Date().toISOString()}`,
     "",
   ];
 
   for (const [name, schema] of Object.entries<any>(schemas)) {
     if (schema.enum) {
-      lines.push(`export type ${name} = ${schema.enum.map((e: string) => `"${e}"`).join(" | ")};`);
+      lines.push(
+        `export type ${name} = ${schema.enum.map((e: string) => `"${e}"`).join(" | ")};`
+      );
+      lines.push("");
       continue;
     }
-    if (schema.type === "object" || schema.allOf || schema.properties) {
+    if (schema.allOf) {
+      const refs = schema.allOf
+        .filter((s: any) => s.$ref)
+        .map((s: any) => s.$ref.split("/").pop());
+      const inline = schema.allOf.find((s: any) => s.properties);
+      if (refs.length > 0 && !inline) {
+        lines.push(`export type ${name} = ${refs.join(" & ")};`);
+      } else {
+        lines.push(`export interface ${name} extends ${refs.join(", ")} {`);
+        if (inline?.properties) {
+          for (const [k, v] of Object.entries<any>(inline.properties)) {
+            const opt = inline.required?.includes(k) ? "" : "?";
+            lines.push(`  ${k}${opt}: ${schemaToTs(v)};`);
+          }
+        }
+        lines.push("}");
+      }
+      lines.push("");
+      continue;
+    }
+    if (schema.type === "object" || schema.properties) {
       const props = schema.properties ?? {};
       const required: string[] = schema.required ?? [];
-      const fields = Object.entries<any>(props).map(([k, v]) => {
+      lines.push(`export interface ${name} {`);
+      for (const [k, v] of Object.entries<any>(props)) {
         const opt = required.includes(k) ? "" : "?";
         const nullable = v.nullable ? " | null" : "";
-        return `  ${k}${opt}: ${schemaToTs(v)}${nullable};`;
-      });
-      lines.push(`export interface ${name} {`);
-      lines.push(...fields);
+        lines.push(`  ${k}${opt}: ${schemaToTs(v)}${nullable};`);
+      }
       lines.push("}");
       lines.push("");
     }
@@ -159,40 +176,53 @@ function generateSchemaTs(spec: any): string {
   return lines.join("\n");
 }
 
-// ─── Client Generator ────────────────────────────────────────────────────────
+// ─── Operations ───────────────────────────────────────────────────────────────
 
-interface OperationInfo {
+interface Op {
   operationId: string;
   method: string;
   path: string;
   tag: string;
   summary: string;
-  hasBody: boolean;
-  hasPathParams: boolean;
-  hasQueryParams: boolean;
-  requestBodySchema?: string;
-  responseSchema?: string;
   pathParams: string[];
   queryParams: Array<{ name: string; required: boolean; type: string }>;
+  hasBody: boolean;
+  bodyType: string;
+  returnType: string;
 }
 
-function extractOperations(spec: any): OperationInfo[] {
-  const ops: OperationInfo[] = [];
+function sanitizeId(s: string): string {
+  return s.replace(/[-\s]/g, "_").replace(/[^a-zA-Z0-9_]/g, "");
+}
+
+function deriveId(method: string, rawPath: string): string {
+  const cleaned = rawPath
+    .replace(/^\/api\/v\d+\//, "")
+    .split("/")
+    .map((p) =>
+      p.startsWith("{")
+        ? "By" + p.slice(1, -1).charAt(0).toUpperCase() + p.slice(2, -1)
+        : p.charAt(0).toUpperCase() + p.slice(1)
+    )
+    .join("");
+  return method.toLowerCase() + cleaned;
+}
+
+function extractOps(spec: any): Op[] {
+  const ops: Op[] = [];
   for (const [rawPath, pathItem] of Object.entries<any>(spec.paths ?? {})) {
-    for (const method of ["get", "post", "patch", "put", "delete"]) {
+    for (const method of ["get", "post", "put", "patch", "delete"]) {
       const op = pathItem[method];
       if (!op) continue;
 
-      const tag = op.tags?.[0] ?? getResourceFromPath(rawPath);
-      const operationId =
-        op.operationId ?? pathToOperationName(method, rawPath);
+      const tag = sanitizeId(op.tags?.[0] ?? rawPath.split("/")[3] ?? "api");
+      const operationId = sanitizeId(
+        op.operationId ?? deriveId(method, rawPath)
+      );
 
-      // Path params
       const pathParams = (rawPath.match(/\{([^}]+)\}/g) ?? []).map((p: string) =>
         p.slice(1, -1)
       );
-
-      // Query params
       const queryParams = (op.parameters ?? [])
         .filter((p: any) => p.in === "query")
         .map((p: any) => ({
@@ -201,93 +231,78 @@ function extractOperations(spec: any): OperationInfo[] {
           type: schemaToTs(p.schema),
         }));
 
-      // Body schema
-      const bodyContent = op.requestBody?.content?.["application/json"]?.schema;
-      const bodyRef = bodyContent?.$ref?.split("/").pop() ?? null;
-      const bodyInline = bodyContent && !bodyRef ? schemaToTs(bodyContent) : null;
+      const bodySchema =
+        op.requestBody?.content?.["application/json"]?.schema;
+      const bodyRef = bodySchema?.$ref?.split("/").pop();
+      const bodyType = bodyRef ? `Schema.${bodyRef}` : bodySchema ? "Record<string, unknown>" : "";
 
-      // Response schema
-      const resp200 =
+      const resp =
         op.responses?.["200"]?.content?.["application/json"]?.schema ??
         op.responses?.["201"]?.content?.["application/json"]?.schema;
-      const respRef = resp200?.$ref?.split("/").pop() ?? null;
+      const respRef = resp?.$ref?.split("/").pop();
+      const returnType = respRef ? `Schema.${respRef}` : resp ? "unknown" : "void";
 
       ops.push({
-        operationId: operationId.replace(/-/g, "_"),
+        operationId,
         method,
         path: rawPath,
         tag,
         summary: op.summary ?? "",
-        hasBody: !!op.requestBody,
-        hasPathParams: pathParams.length > 0,
-        hasQueryParams: queryParams.length > 0,
-        requestBodySchema: bodyRef ?? (bodyInline ? "unknown" : undefined),
-        responseSchema: respRef ?? undefined,
         pathParams,
         queryParams,
+        hasBody: !!op.requestBody,
+        bodyType,
+        returnType,
       });
     }
   }
   return ops;
 }
 
-function generateClientTs(spec: any, ops: OperationInfo[]): string {
+// ─── Client Generator ────────────────────────────────────────────────────────
+
+function generateClientTs(ops: Op[], spec: any): string {
   const lines: string[] = [
-    "// AUTO-GENERATED — do not edit manually",
-    "// Run: npm run generate-api",
+    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
+    `// Generated: ${new Date().toISOString()}`,
     "",
     'import type * as Schema from "./schema";',
     'import { apiRequest } from "../http-client";',
     "",
   ];
 
-  // Group by tag
-  const byTag: Record<string, OperationInfo[]> = {};
+  const byTag: Record<string, Op[]> = {};
   for (const op of ops) {
     byTag[op.tag] = byTag[op.tag] ?? [];
     byTag[op.tag].push(op);
   }
 
   for (const [tag, tagOps] of Object.entries(byTag)) {
-    lines.push(`// ─── ${tag} ───────────────────────────────────────────────`);
+    lines.push(`// ─── ${tag} ─────────────────────────────────────────────`);
     for (const op of tagOps) {
-      const returnType = op.responseSchema
-        ? `Schema.${op.responseSchema}`
-        : "unknown";
-
-      // Build parameter list
-      const params: string[] = [];
-      if (op.hasPathParams) {
-        params.push(`pathParams: { ${op.pathParams.map((p) => `${p}: string`).join("; ")} }`);
-      }
-      if (op.hasBody) {
-        const bodyType = op.requestBodySchema ? `Schema.${op.requestBodySchema}` : "unknown";
-        params.push(`body: ${bodyType}`);
-      }
-      if (op.hasQueryParams) {
-        const qpType = op.queryParams
-          .map((q) => `${q.name}${q.required ? "" : "?"}:${q.type}`)
+      const args: string[] = [];
+      if (op.pathParams.length)
+        args.push(`pathParams: { ${op.pathParams.map((p) => `${p}: string`).join("; ")} }`);
+      if (op.hasBody && op.bodyType)
+        args.push(`body: ${op.bodyType}`);
+      if (op.queryParams.length) {
+        const qt = op.queryParams
+          .map((q) => `${q.name}${q.required ? "" : "?"}: ${q.type}`)
           .join("; ");
-        params.push(`query?: { ${qpType} }`);
+        args.push(`query?: { ${qt} }`);
       }
 
-      // Build URL
-      let urlExpr = `\`${op.path.replace(/{([^}]+)}/g, "${pathParams.$1}")}\``;
-      if (!op.hasPathParams) {
-        urlExpr = `"${op.path}"`;
-      }
+      const urlExpr = op.pathParams.length
+        ? `\`${op.path.replace(/{([^}]+)}/g, "${pathParams.$1}")}\``
+        : `"${op.path}"`;
 
       lines.push(`/** ${op.summary} */`);
-      lines.push(
-        `export async function ${op.operationId}(${params.join(", ")}): Promise<${returnType}> {`
-      );
-      lines.push(
-        `  return apiRequest<${returnType}>({`
-      );
+      lines.push(`export async function ${op.operationId}(${args.join(", ")}): Promise<${op.returnType}> {`);
+      lines.push(`  return apiRequest<${op.returnType}>({`);
       lines.push(`    method: "${op.method.toUpperCase()}",`);
       lines.push(`    url: ${urlExpr},`);
       if (op.hasBody) lines.push("    body,");
-      if (op.hasQueryParams) lines.push("    params: query,");
+      if (op.queryParams.length) lines.push("    params: query,");
       lines.push("  });");
       lines.push("}");
       lines.push("");
@@ -300,10 +315,10 @@ function generateClientTs(spec: any, ops: OperationInfo[]): string {
 
 const QUERY_METHODS = new Set(["get"]);
 
-function generateHookFile(tag: string, ops: OperationInfo[]): string {
+function generateHookFile(tag: string, ops: Op[]): string {
   const lines: string[] = [
-    "// AUTO-GENERATED — do not edit manually",
-    "// Run: npm run generate-api",
+    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
+    `// Generated: ${new Date().toISOString()}`,
     "",
     '"use client";',
     "",
@@ -311,50 +326,51 @@ function generateHookFile(tag: string, ops: OperationInfo[]): string {
     `import * as api from "@/lib/generated/client";`,
     `import type * as Schema from "@/lib/generated/schema";`,
     "",
-    `export const ${tag.toLowerCase()}Keys = {`,
-    `  all: ["${tag.toLowerCase()}"] as const,`,
   ];
 
-  // Emit query keys for GET operations
+  // Query key map
+  const lower = tag.toLowerCase();
+  lines.push(`export const ${lower}Keys = {`);
+  lines.push(`  all: ["${lower}"] as const,`);
   for (const op of ops.filter((o) => QUERY_METHODS.has(o.method))) {
-    if (op.hasPathParams) {
-      const pList = op.pathParams.map((p) => `${p}: string`).join(", ");
-      lines.push(`  ${op.operationId}: (${pList}) => [...${tag.toLowerCase()}Keys.all, "${op.operationId}", ${op.pathParams.join(", ")}] as const,`);
+    if (op.pathParams.length) {
+      const pl = op.pathParams.map((p) => `${p}: string`).join(", ");
+      const pv = op.pathParams.join(", ");
+      lines.push(`  ${op.operationId}: (${pl}) => [...${lower}Keys.all, "${op.operationId}", ${pv}] as const,`);
     } else {
-      lines.push(`  ${op.operationId}: (params?: object) => [...${tag.toLowerCase()}Keys.all, "${op.operationId}", params] as const,`);
+      lines.push(`  ${op.operationId}: (params?: object) => [...${lower}Keys.all, "${op.operationId}", params] as const,`);
     }
   }
   lines.push("} as const;", "");
 
-  // Emit hooks
   for (const op of ops) {
     const hookName =
-      "use" +
-      op.operationId.charAt(0).toUpperCase() +
-      op.operationId.slice(1);
+      "use" + op.operationId.charAt(0).toUpperCase() + op.operationId.slice(1);
 
     if (QUERY_METHODS.has(op.method)) {
-      // useQuery hook
-      const pList = op.hasPathParams
-        ? op.pathParams.map((p) => `${p}: string`).join(", ")
-        : "";
-      const qpList = op.hasQueryParams
-        ? `params?: { ${op.queryParams.map((q) => `${q.name}${q.required ? "" : "?"}: ${q.type}`).join("; ")} }`
-        : "";
-      const argList = [pList, qpList].filter(Boolean).join(", ");
-      const keyCall = op.hasPathParams
-        ? `${tag.toLowerCase()}Keys.${op.operationId}(${op.pathParams.join(", ")})`
-        : `${tag.toLowerCase()}Keys.${op.operationId}(${op.hasQueryParams ? "params" : ""})`;
+      const fnArgs: string[] = [];
+      if (op.pathParams.length)
+        fnArgs.push(...op.pathParams.map((p) => `${p}: string`));
+      if (op.queryParams.length) {
+        const qt = op.queryParams.map((q) => `${q.name}${q.required ? "" : "?"}: ${q.type}`).join("; ");
+        fnArgs.push(`params?: { ${qt} }`);
+      }
+
+      const keyCall = op.pathParams.length
+        ? `${lower}Keys.${op.operationId}(${op.pathParams.join(", ")})`
+        : `${lower}Keys.${op.operationId}(${op.queryParams.length ? "params" : ""})`;
+
       const apiFnArgs: string[] = [];
-      if (op.hasPathParams) apiFnArgs.push(`{ ${op.pathParams.map((p) => `${p}`).join(", ")} }`);
-      if (op.hasQueryParams) apiFnArgs.push("params");
-      const enabledGuard = op.hasPathParams
+      if (op.pathParams.length) apiFnArgs.push(`{ ${op.pathParams.join(", ")} }`);
+      if (op.queryParams.length) apiFnArgs.push("params");
+
+      const enabledGuard = op.pathParams.length
         ? `enabled: ${op.pathParams.map((p) => `!!${p}`).join(" && ")},`
         : "";
 
       lines.push(`/** ${op.summary} */`);
-      lines.push(`export function ${hookName}(${argList}) {`);
-      lines.push(`  return useQuery({`);
+      lines.push(`export function ${hookName}(${fnArgs.join(", ")}) {`);
+      lines.push("  return useQuery({");
       lines.push(`    queryKey: ${keyCall},`);
       lines.push(`    queryFn: () => api.${op.operationId}(${apiFnArgs.join(", ")}),`);
       if (enabledGuard) lines.push(`    ${enabledGuard}`);
@@ -363,15 +379,14 @@ function generateHookFile(tag: string, ops: OperationInfo[]): string {
       lines.push("}");
       lines.push("");
     } else {
-      // useMutation hook
       lines.push(`/** ${op.summary} */`);
       lines.push(`export function ${hookName}() {`);
-      lines.push(`  const qc = useQueryClient();`);
-      lines.push(`  return useMutation({`);
+      lines.push("  const qc = useQueryClient();");
+      lines.push("  return useMutation({");
       lines.push(`    mutationFn: api.${op.operationId},`);
-      lines.push(`    onSuccess: () => {`);
-      lines.push(`      qc.invalidateQueries({ queryKey: ${tag.toLowerCase()}Keys.all });`);
-      lines.push(`    },`);
+      lines.push("    onSuccess: () => {");
+      lines.push(`      qc.invalidateQueries({ queryKey: ${lower}Keys.all });`);
+      lines.push("    },");
       lines.push("  });");
       lines.push("}");
       lines.push("");
@@ -380,84 +395,152 @@ function generateHookFile(tag: string, ops: OperationInfo[]): string {
   return lines.join("\n");
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Placeholder generator (when backend is unavailable) ──────────────────────
 
-async function main() {
-  console.log("\n🚀 DocuMind API Codegen");
-  console.log("─".repeat(50));
-
-  // 1. Load spec
-  let spec: any;
-  if (LOCAL_FILE) {
-    console.log(`📂 Reading spec from ${LOCAL_FILE}`);
-    spec = JSON.parse(fs.readFileSync(LOCAL_FILE, "utf-8"));
-  } else {
-    const specUrl = `${API_URL}/api/openapi.json`;
-    console.log(`🌐 Fetching spec from ${specUrl}`);
-    spec = await fetchJson(specUrl);
-  }
-
-  console.log(`✔  Loaded spec: ${spec.info?.title} v${spec.info?.version}`);
-  console.log(`   Paths: ${Object.keys(spec.paths ?? {}).length}`);
-  console.log(`   Schemas: ${Object.keys(spec.components?.schemas ?? {}).length}`);
-  console.log("");
-
-  // 2. Setup output dirs
+function generatePlaceholders() {
   mkdirp(GENERATED_LIB);
   mkdirp(GENERATED_HOOKS);
 
-  // 3. Extract operations
-  const ops = extractOperations(spec);
-  console.log(`📋 Found ${ops.length} operations`);
-  console.log("");
+  const schemaPlaceholder = [
+    "// AUTO-GENERATED placeholder — run `npm run generate-api` with backend running",
+    "// This file will be replaced when the backend is available.",
+    "",
+    "export interface Placeholder { _placeholder: true }",
+  ].join("\n");
 
-  // 4. Generate schema types
-  console.log("📝 Generating types...");
-  write(path.join(GENERATED_LIB, "schema.ts"), generateSchemaTs(spec));
+  const clientPlaceholder = [
+    "// AUTO-GENERATED placeholder — run `npm run generate-api` with backend running",
+    "",
+    'import { apiRequest } from "../http-client";',
+    "",
+    "// No operations available — start backend and run: npm run generate-api",
+  ].join("\n");
 
-  // 5. Generate typed API client
-  console.log("🔌 Generating API client...");
-  write(path.join(GENERATED_LIB, "client.ts"), generateClientTs(spec, ops));
+  const indexPlaceholder = [
+    "// AUTO-GENERATED placeholder — run `npm run generate-api` with backend running",
+  ].join("\n");
 
-  // 6. Group by tag, generate hooks
-  console.log("🪝 Generating React Query hooks...");
-  const byTag: Record<string, OperationInfo[]> = {};
-  for (const op of ops) {
-    const tag = op.tag.replace(/\s+/g, "");
-    byTag[tag] = byTag[tag] ?? [];
-    byTag[tag].push(op);
+  // Only write placeholders if files don't already exist
+  if (!fs.existsSync(path.join(GENERATED_LIB, "schema.ts")))
+    write(path.join(GENERATED_LIB, "schema.ts"), schemaPlaceholder);
+  if (!fs.existsSync(path.join(GENERATED_LIB, "client.ts")))
+    write(path.join(GENERATED_LIB, "client.ts"), clientPlaceholder);
+  if (!fs.existsSync(path.join(GENERATED_HOOKS, "index.ts")))
+    write(path.join(GENERATED_HOOKS, "index.ts"), indexPlaceholder);
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  console.log("\n🚀  DocuMind API Codegen");
+  console.log("─".repeat(50));
+
+  mkdirp(GENERATED_LIB);
+  mkdirp(GENERATED_HOOKS);
+
+  // 1. Load OpenAPI spec
+  let spec: any = null;
+
+  if (LOCAL_FILE) {
+    console.log(`📂  Reading spec from: ${LOCAL_FILE}`);
+    try {
+      spec = JSON.parse(fs.readFileSync(LOCAL_FILE, "utf-8"));
+    } catch (err: any) {
+      console.error(`❌  Cannot read file: ${err.message}`);
+    }
+  } else {
+    const specUrl = `${API_URL}/api/openapi.json`;
+    console.log(`🌐  Fetching spec from: ${specUrl}`);
+    try {
+      spec = await fetchJson(specUrl);
+      console.log(`✔   Connected to backend`);
+    } catch (err: any) {
+      console.warn(`⚠   Backend unavailable: ${err.message}`);
+      // Try snapshot fallback
+      if (fs.existsSync(SNAPSHOT_PATH)) {
+        console.log(`📦  Using cached snapshot: ${SNAPSHOT_PATH}`);
+        try {
+          spec = JSON.parse(fs.readFileSync(SNAPSHOT_PATH, "utf-8"));
+        } catch {
+          spec = null;
+        }
+      }
+    }
   }
 
-  const hookFiles: string[] = [];
+  // 2. Graceful fallback
+  if (!spec) {
+    if (SAFE_MODE) {
+      console.warn(
+        "\n⚠   No spec available — writing placeholder files.\n" +
+        "    Start the backend and run: npm run generate-api\n"
+      );
+      generatePlaceholders();
+      process.exit(0);
+    } else {
+      console.error("\n❌  No spec available. Use --safe to skip gracefully.");
+      process.exit(1);
+    }
+  }
+
+  console.log(`✔   Loaded: ${spec.info?.title} v${spec.info?.version}`);
+  console.log(`    Paths: ${Object.keys(spec.paths ?? {}).length}  |  Schemas: ${Object.keys(spec.components?.schemas ?? {}).length}`);
+  console.log("");
+
+  // 3. Extract operations
+  const ops = extractOps(spec);
+  const byTag: Record<string, Op[]> = {};
+  for (const op of ops) {
+    byTag[op.tag] = byTag[op.tag] ?? [];
+    byTag[op.tag].push(op);
+  }
+  console.log(`📋  ${ops.length} operations across ${Object.keys(byTag).length} tags`);
+  console.log("");
+
+  // 4. Generate schema.ts
+  console.log("📝  Generating schema types…");
+  write(path.join(GENERATED_LIB, "schema.ts"), generateSchemaTs(spec));
+
+  // 5. Generate client.ts
+  console.log("🔌  Generating API client…");
+  write(path.join(GENERATED_LIB, "client.ts"), generateClientTs(ops, spec));
+
+  // 6. Generate hooks per tag
+  console.log("🪝  Generating React Query hooks…");
+  const hookTags: string[] = [];
   for (const [tag, tagOps] of Object.entries(byTag)) {
-    const fileName = `use${tag}.ts`;
-    const outPath = path.join(GENERATED_HOOKS, fileName);
-    write(outPath, generateHookFile(tag, tagOps));
-    hookFiles.push(tag);
+    const normalized = tag.charAt(0).toUpperCase() + tag.slice(1);
+    write(
+      path.join(GENERATED_HOOKS, `use${normalized}.ts`),
+      generateHookFile(normalized, tagOps)
+    );
+    hookTags.push(normalized);
   }
 
   // 7. Barrel export
   const barrel = [
-    "// AUTO-GENERATED — do not edit manually",
-    "// Run: npm run generate-api",
+    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
+    `// Generated: ${new Date().toISOString()}`,
     "",
-    ...hookFiles.map((tag) => `export * from "./use${tag}";`),
+    ...hookTags.map((tag) => `export * from "./use${tag}";`),
   ].join("\n");
   write(path.join(GENERATED_HOOKS, "index.ts"), barrel);
 
-  // 8. Save a copy of the spec for offline use
-  write(
-    path.join(GENERATED_LIB, "openapi.json"),
-    JSON.stringify(spec, null, 2)
-  );
+  // 8. Save spec snapshot
+  write(SNAPSHOT_PATH, JSON.stringify(spec, null, 2));
 
   console.log("");
-  console.log("✅ Codegen complete!");
-  console.log(`   Tags generated: ${hookFiles.join(", ")}`);
+  console.log(`✅  Codegen complete!  Tags: ${hookTags.join(", ")}`);
   console.log("");
 }
 
 main().catch((err) => {
-  console.error("❌ Codegen failed:", err.message);
-  process.exit(1);
+  if (SAFE_MODE) {
+    console.warn(`\n⚠   Codegen failed (safe mode): ${err.message}\n`);
+    generatePlaceholders();
+    process.exit(0);
+  } else {
+    console.error(`\n❌  Codegen failed: ${err.message}`);
+    process.exit(1);
+  }
 });

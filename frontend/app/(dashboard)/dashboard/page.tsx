@@ -11,7 +11,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { analyticsApi } from "@/lib/api-manual";
+import { analyticsClient } from "@/lib/api-client";
 import { formatBytes, formatRelativeTime } from "@/lib/utils";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useConversations } from "@/hooks/useConversations";
@@ -71,13 +71,13 @@ export default function DashboardPage() {
   // Use generated hooks (from codegen) — fallback to manual until generated
   const { data: overview, isLoading: overviewLoading } = useQuery({
     queryKey: ["analytics", "overview"],
-    queryFn: () => analyticsApi.overview(),
+    queryFn: () => analyticsClient.overview(),
     staleTime: 60_000,
   });
 
   const { data: activityData } = useQuery({
     queryKey: ["analytics", "activity"],
-    queryFn: () => analyticsApi.activity(),
+    queryFn: () => analyticsClient.activity(),
   });
 
   const { data: docsData, isLoading: docsLoading } = useDocuments({

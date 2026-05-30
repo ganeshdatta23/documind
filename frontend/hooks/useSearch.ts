@@ -1,79 +1,56 @@
 /**
- * useSearch — hook for search with debouncing and SSE streaming.
+ * useSearch — search hooks using searchClient and SSE stream generator.
  */
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
-import { searchApi, type ChunkResult, type SearchRequest, type SearchResponse } from "@/lib/api";
+import { searchClient, type ChunkResult, type SearchRequest } from "@/lib/api-client";
+import { streamSearch } from "@/lib/api";
+
+// ─── Standard search mutation ────────────────────────────────────────────────
 
 export function useSearch() {
   return useMutation({
-    mutationFn: (req: SearchRequest) => searchApi.search(req),
+    mutationFn: (req: SearchRequest) => searchClient.search(req),
   });
 }
 
-/** Stream search results via SSE. */
+// ─── Streaming search via SSE ────────────────────────────────────────────────
+
 export function useSearchStream() {
   const [results, setResults] = useState<ChunkResult[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const search = useCallback(
-    async (req: SearchRequest) => {
-      // Close existing connection
-      if (eventSourceRef.current) eventSourceRef.current.close();
-      setResults([]);
-      setIsStreaming(true);
+  const search = useCallback(async (req: SearchRequest) => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    setResults([]);
+    setIsStreaming(true);
+    setLatencyMs(null);
 
-      // POST body as query param is not clean for SSE; use fetch + ReadableStream
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/search/stream`;
-      const token =
-        typeof window !== "undefined" ? (window as any).__AUTH_TOKEN__ : "";
-
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(req),
-      });
-
-      if (!response.body) { setIsStreaming(false); return; }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() ?? "";
-
-        for (const block of lines) {
-          if (!block.trim()) continue;
-          const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
-          const eventLine = block.split("\n").find((l) => l.startsWith("event:"));
-          if (!dataLine) continue;
-          const data = JSON.parse(dataLine.slice(5).trim());
-          const event = eventLine?.slice(6).trim();
-
-          if (event === "result") {
-            setResults((prev) => [...prev, data]);
-          } else if (event === "done") {
-            setLatencyMs(data.latency_ms);
-            setIsStreaming(false);
-          }
+    try {
+      for await (const event of streamSearch(req.query, req, abortRef.current.signal)) {
+        if (event.event === "result") {
+          setResults((prev) => [...prev, event.data as ChunkResult]);
+        } else if (event.event === "done") {
+          const d = event.data as { latency_ms?: number };
+          if (d.latency_ms) setLatencyMs(d.latency_ms);
         }
       }
+    } catch (err: any) {
+      if (err.name !== "AbortError") console.error("Search stream error:", err);
+    } finally {
       setIsStreaming(false);
-    },
-    []
-  );
+    }
+  }, []);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+    setIsStreaming(false);
+  }, []);
 
   const reset = useCallback(() => {
     setResults([]);
@@ -81,5 +58,5 @@ export function useSearchStream() {
     setIsStreaming(false);
   }, []);
 
-  return { search, results, isStreaming, latencyMs, reset };
+  return { search, results, isStreaming, latencyMs, cancel, reset };
 }

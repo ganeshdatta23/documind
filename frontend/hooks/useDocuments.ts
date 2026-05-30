@@ -1,5 +1,6 @@
 /**
  * useDocuments — React Query hooks for document CRUD and status polling.
+ * Source: lib/api-client.ts → documentsClient
  */
 "use client";
 
@@ -7,20 +8,29 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
-  type UseMutationResult,
 } from "@tanstack/react-query";
-import { documentsApi, type Document, type DocumentListParams } from "@/lib/api";
+import {
+  documentsClient,
+  type Document,
+  type DocumentListParams,
+} from "@/lib/api-client";
+import { uploadDocument } from "@/lib/api";
+
+// ─── Query Keys ─────────────────────────────────────────────────────────────
 
 export const documentKeys = {
   all: ["documents"] as const,
-  list: (params?: DocumentListParams) => [...documentKeys.all, "list", params] as const,
+  list: (params?: DocumentListParams) =>
+    [...documentKeys.all, "list", params] as const,
   detail: (id: string) => [...documentKeys.all, "detail", id] as const,
 };
+
+// ─── Queries ─────────────────────────────────────────────────────────────────
 
 export function useDocuments(params?: DocumentListParams) {
   return useQuery({
     queryKey: documentKeys.list(params),
-    queryFn: () => documentsApi.list(params),
+    queryFn: () => documentsClient.list(params),
     staleTime: 30_000,
   });
 }
@@ -28,10 +38,27 @@ export function useDocuments(params?: DocumentListParams) {
 export function useDocument(id: string) {
   return useQuery({
     queryKey: documentKeys.detail(id),
-    queryFn: () => documentsApi.get(id),
-    enabled: !!id,
+    queryFn: () => documentsClient.get(id),
+    enabled: Boolean(id),
+    staleTime: 30_000,
   });
 }
+
+/** Poll document until it reaches a terminal status. */
+export function useDocumentStatus(id: string) {
+  return useQuery({
+    queryKey: [...documentKeys.detail(id), "poll"],
+    queryFn: () => documentsClient.get(id),
+    enabled: Boolean(id),
+    refetchInterval: (query) => {
+      const s = query.state.data?.status;
+      if (!s || ["ready", "failed", "archived"].includes(s)) return false;
+      return 2_000;
+    },
+  });
+}
+
+// ─── Mutations ───────────────────────────────────────────────────────────────
 
 export function useUploadDocument() {
   const qc = useQueryClient();
@@ -42,7 +69,7 @@ export function useUploadDocument() {
     }: {
       formData: FormData;
       onProgress?: (pct: number) => void;
-    }) => documentsApi.upload(formData, onProgress),
+    }) => uploadDocument(formData, onProgress),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: documentKeys.all });
     },
@@ -58,7 +85,7 @@ export function useUpdateDocument() {
     }: {
       id: string;
       data: Partial<Pick<Document, "title" | "description" | "tags">>;
-    }) => documentsApi.update(id, data),
+    }) => documentsClient.update(id, data),
     onSuccess: (_, { id }) => {
       qc.invalidateQueries({ queryKey: documentKeys.detail(id) });
       qc.invalidateQueries({ queryKey: documentKeys.all });
@@ -69,23 +96,9 @@ export function useUpdateDocument() {
 export function useDeleteDocument() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => documentsApi.delete(id),
+    mutationFn: (id: string) => documentsClient.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: documentKeys.all });
-    },
-  });
-}
-
-/** Poll document status until terminal state. */
-export function useDocumentStatus(id: string, enabled = true) {
-  return useQuery({
-    queryKey: [...documentKeys.detail(id), "status"],
-    queryFn: () => documentsApi.get(id),
-    enabled: !!id && enabled,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (!status || ["ready", "failed", "archived"].includes(status)) return false;
-      return 2000; // poll every 2 seconds while processing
     },
   });
 }

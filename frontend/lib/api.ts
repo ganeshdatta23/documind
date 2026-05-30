@@ -1,169 +1,142 @@
 /**
- * Manual API methods not generated from OpenAPI:
- *  - File upload with progress
- *  - SSE streaming endpoints
- *  - Auth (cookies + token management)
- *
- * Everything else comes from: lib/generated/client.ts (auto-generated)
+ * lib/api.ts — SSE Streaming + File Upload
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Uses API_BASE_URL and getToken() from http-client — NO hardcoded paths.
+ * Fetch is used (not Axios) because ReadableStream requires native fetch.
+ * The base URL is the same as httpClient so routing stays consistent.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
-import httpClient from "@/lib/http-client";
+import httpClient, { API_BASE_URL, getToken } from "@/lib/http-client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-// ─── Auth (manual — handles token side effects) ───────────────────────────────
-
-export interface LoginPayload { email: string; password: string }
-export interface TokenResponse {
-  access_token: string; token_type: string;
-  expires_in: number; user: AuthUser;
-}
-export interface AuthUser {
-  id: string; email: string; full_name: string;
-  tenant_id: string; roles: string[]; is_superadmin: boolean;
-}
-
-export const authManualApi = {
-  login: (data: LoginPayload) =>
-    httpClient.post<TokenResponse>("/auth/login", data).then((r) => r.data),
-  logout: () => httpClient.post("/auth/logout").then((r) => r.data),
-  refresh: () =>
-    httpClient.post<TokenResponse>("/auth/refresh").then((r) => r.data),
-};
-
-// ─── File upload with progress (multipart) ────────────────────────────────────
+// ─── File Upload (multipart, with progress) ───────────────────────────────────
 
 export function uploadDocument(
   formData: FormData,
   onProgress?: (percent: number) => void
 ) {
   return httpClient
-    .post<{ id: string; status: string; title: string }>("/documents", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-      onUploadProgress: (e) => {
-        if (onProgress && e.total) {
-          onProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      },
-    })
+    .post<{ id: string; status: string; title: string }>(
+      "/documents",
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (e) => {
+          if (onProgress && e.total) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        },
+      }
+    )
     .then((r) => r.data);
 }
 
-// ─── SSE: Chat streaming ──────────────────────────────────────────────────────
+// ─── SSE helper ────────────────────────────────────────────────────────────────
+// Streams response body as Server-Sent Events and yields typed event objects.
+// Uses API_BASE_URL from http-client — no hardcoded /api/v1 paths.
+
+async function* readSSEStream<T extends { event: string; data: unknown }>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal
+): AsyncGenerator<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const err = await res.json();
+      message = err?.error?.message ?? message;
+    } catch { /* ignore */ }
+    throw new Error(message);
+  }
+
+  if (!res.body) return;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+      const blocks = buf.split("\n\n");
+      buf = blocks.pop() ?? "";
+
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+        const eventLine = block.split("\n").find((l) => l.startsWith("event:"));
+        const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
+        if (!dataLine) continue;
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(dataLine.slice(5).trim());
+        } catch {
+          continue; // skip malformed frames
+        }
+
+        yield {
+          event: eventLine?.slice(6).trim() ?? "message",
+          data: parsed,
+        } as T;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// ─── Chat streaming ───────────────────────────────────────────────────────────
 
 export interface ChatSSEEvent {
   event: "token" | "done" | "error";
   data: {
     token?: string;
     answer?: string;
-    citations?: Citation[];
+    citations?: unknown[];
     retrieval_latency_ms?: number;
     message?: string;
   };
 }
 
-export interface Citation {
-  index: number; chunk_id: string; document_id: string;
-  document_title: string; document_filename: string;
-  page_number: number | null; excerpt: string;
-}
-
-export async function* streamChatMessage(
+export function streamChatMessage(
   conversationId: string,
   content: string,
   signal?: AbortSignal
 ): AsyncGenerator<ChatSSEEvent> {
-  const token =
-    typeof window !== "undefined" ? (window as any).__DOCUMIND_TOKEN__ : "";
-
-  const res = await fetch(
-    `${API_BASE}/api/v1/conversations/${conversationId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ content }),
-      signal,
-    }
+  return readSSEStream<ChatSSEEvent>(
+    `/conversations/${conversationId}/messages`,
+    { content },
+    signal
   );
-
-  if (!res.ok) {
-    throw new Error(`Chat API error: ${res.status}`);
-  }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const blocks = buf.split("\n\n");
-    buf = blocks.pop() ?? "";
-
-    for (const block of blocks) {
-      if (!block.trim()) continue;
-      const eventLine = block.split("\n").find((l) => l.startsWith("event:"));
-      const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
-      if (!dataLine) continue;
-
-      yield {
-        event: (eventLine?.slice(6).trim() as ChatSSEEvent["event"]) ?? "token",
-        data: JSON.parse(dataLine.slice(5).trim()),
-      };
-    }
-  }
 }
 
-// ─── SSE: Search streaming ────────────────────────────────────────────────────
+// ─── Search streaming ─────────────────────────────────────────────────────────
 
-export interface SearchSSEResult {
-  event: "result" | "done";
+export interface SearchSSEEvent {
+  event: "result" | "done" | "error";
   data: unknown;
 }
 
-export async function* streamSearch(
+export function streamSearch(
   query: string,
   options?: { document_ids?: string[]; top_k?: number },
   signal?: AbortSignal
-): AsyncGenerator<SearchSSEResult> {
-  const token =
-    typeof window !== "undefined" ? (window as any).__DOCUMIND_TOKEN__ : "";
-
-  const res = await fetch(`${API_BASE}/api/v1/search/stream`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ query, ...options }),
-    signal,
-  });
-
-  if (!res.ok) throw new Error(`Search API error: ${res.status}`);
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const blocks = buf.split("\n\n");
-    buf = blocks.pop() ?? "";
-
-    for (const block of blocks) {
-      if (!block.trim()) continue;
-      const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
-      const eventLine = block.split("\n").find((l) => l.startsWith("event:"));
-      if (!dataLine) continue;
-      yield {
-        event: (eventLine?.slice(6).trim() as SearchSSEResult["event"]) ?? "result",
-        data: JSON.parse(dataLine.slice(5).trim()),
-      };
-    }
-  }
+): AsyncGenerator<SearchSSEEvent> {
+  return readSSEStream<SearchSSEEvent>(
+    "/search/stream",
+    { query, ...options },
+    signal
+  );
 }

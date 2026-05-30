@@ -1,4 +1,4 @@
-"""User repository — full CRUD with role management and tenant isolation."""
+"""User repository — fixed imports to match models.py exports."""
 from typing import Optional
 from uuid import UUID
 
@@ -49,13 +49,17 @@ class UserRepository:
     ) -> tuple[list[User], int]:
         q = (
             select(User)
-            .where(and_(User.tenant_id == tenant_id, User.deleted_at.is_(None)))
+            .where(
+                and_(User.tenant_id == tenant_id, User.deleted_at.is_(None))
+            )
             .options(selectinload(User.roles))
         )
         if is_active is not None:
             q = q.where(User.is_active == is_active)
 
-        total = await self.db.scalar(select(func.count()).select_from(q.subquery()))
+        total = await self.db.scalar(
+            select(func.count()).select_from(q.subquery())
+        )
         result = await self.db.execute(
             q.order_by(User.created_at.desc()).limit(limit).offset(offset)
         )
@@ -65,10 +69,12 @@ class UserRepository:
         user = User(**kwargs)
         self.db.add(user)
         await self.db.flush()
-        await self.db.refresh(user)
+        await self.db.refresh(user, ["roles"])
         return user
 
-    async def update(self, user_id: UUID, tenant_id: UUID, **kwargs) -> Optional[User]:
+    async def update(
+        self, user_id: UUID, tenant_id: UUID, **kwargs
+    ) -> Optional[User]:
         await self.db.execute(
             update(User)
             .where(and_(User.id == user_id, User.tenant_id == tenant_id))
@@ -95,19 +101,13 @@ class UserRepository:
     async def set_roles(
         self, user_id: UUID, tenant_id: UUID, role_names: list[str]
     ) -> None:
-        """Replace all roles for a user. Resolve role names → IDs scoped to tenant."""
-        # Get role objects (system roles have tenant_id = NULL)
+        """Replace all role associations for a user."""
         roles_result = await self.db.execute(
-            select(Role).where(
-                and_(
-                    Role.name.in_(role_names),
-                    # System roles (tenant_id=NULL) or tenant-specific roles
-                )
-            )
+            select(Role).where(Role.name.in_(role_names))
         )
         roles = roles_result.scalars().all()
 
-        # Delete existing user_role associations
+        # Remove existing associations
         await self.db.execute(
             delete(user_roles_table).where(
                 user_roles_table.c.user_id == user_id
@@ -125,5 +125,4 @@ class UserRepository:
         await self.db.flush()
 
     async def refresh_roles(self, user: User) -> None:
-        """Refresh the user's role collection (after mutation)."""
-        await self.db.refresh(user, ["roles"])
+        await self.db.refresh(user, attribute_names=["roles"])
