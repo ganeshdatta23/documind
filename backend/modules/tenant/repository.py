@@ -1,11 +1,21 @@
-"""Tenant repository — tenant CRUD with slug uniqueness enforcement."""
+"""Tenant repository — thin session wrapper over queries.tenants."""
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Document, Tenant, User
+from models import Tenant
+from queries import count_from
+from queries.tenants import (
+    select_tenant,
+    select_tenant_by_slug,
+    select_tenant_document_count,
+    select_tenant_storage_used,
+    select_tenant_user_count,
+    select_tenants,
+    soft_delete_tenant,
+    update_tenant_fields,
+)
 
 
 class TenantRepository:
@@ -20,19 +30,11 @@ class TenantRepository:
         return tenant
 
     async def get_by_id(self, tenant_id: UUID) -> Optional[Tenant]:
-        result = await self.db.execute(
-            select(Tenant).where(
-                and_(Tenant.id == tenant_id, Tenant.deleted_at.is_(None))
-            )
-        )
+        result = await self.db.execute(select_tenant(tenant_id))
         return result.scalar_one_or_none()
 
     async def get_by_slug(self, slug: str) -> Optional[Tenant]:
-        result = await self.db.execute(
-            select(Tenant).where(
-                and_(Tenant.slug == slug, Tenant.deleted_at.is_(None))
-            )
-        )
+        result = await self.db.execute(select_tenant_by_slug(slug))
         return result.scalar_one_or_none()
 
     async def list(
@@ -43,54 +45,24 @@ class TenantRepository:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[Tenant], int]:
-        q = select(Tenant).where(Tenant.deleted_at.is_(None))
-        if status:
-            q = q.where(Tenant.status == status)
-        if plan:
-            q = q.where(Tenant.plan == plan)
-
-        total = await self.db.scalar(select(func.count()).select_from(q.subquery()))
-        result = await self.db.execute(
-            q.order_by(Tenant.created_at.desc()).limit(limit).offset(offset)
-        )
-        return list(result.scalars().all()), total or 0
+        base = select_tenants(status=status, plan=plan)
+        total = await count_from(self.db, base.subquery())
+        result = await self.db.execute(base.limit(limit).offset(offset))
+        return list(result.scalars().all()), total
 
     async def update(self, tenant_id: UUID, **kwargs) -> Optional[Tenant]:
-        await self.db.execute(
-            update(Tenant).where(Tenant.id == tenant_id).values(**kwargs)
-        )
+        await self.db.execute(update_tenant_fields(tenant_id, **kwargs))
         return await self.get_by_id(tenant_id)
 
     async def soft_delete(self, tenant_id: UUID) -> bool:
-        from datetime import UTC, datetime
-
-        result = await self.db.execute(
-            update(Tenant)
-            .where(and_(Tenant.id == tenant_id, Tenant.deleted_at.is_(None)))
-            .values(deleted_at=datetime.now(UTC), status="deleted")
-        )
+        result = await self.db.execute(soft_delete_tenant(tenant_id))
         return result.rowcount > 0
 
     async def get_user_count(self, tenant_id: UUID) -> int:
-        result = await self.db.scalar(
-            select(func.count()).where(
-                and_(User.tenant_id == tenant_id, User.deleted_at.is_(None))
-            )
-        )
-        return result or 0
+        return await self.db.scalar(select_tenant_user_count(tenant_id)) or 0
 
     async def get_document_count(self, tenant_id: UUID) -> int:
-        result = await self.db.scalar(
-            select(func.count()).where(
-                and_(Document.tenant_id == tenant_id, Document.deleted_at.is_(None))
-            )
-        )
-        return result or 0
+        return await self.db.scalar(select_tenant_document_count(tenant_id)) or 0
 
     async def get_storage_used(self, tenant_id: UUID) -> int:
-        result = await self.db.scalar(
-            select(func.coalesce(func.sum(Document.file_size_bytes), 0)).where(
-                and_(Document.tenant_id == tenant_id, Document.deleted_at.is_(None))
-            )
-        )
-        return result or 0
+        return await self.db.scalar(select_tenant_storage_used(tenant_id)) or 0

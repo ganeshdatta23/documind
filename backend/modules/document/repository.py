@@ -1,11 +1,22 @@
-"""Document repository — data access for documents and chunks."""
+"""Document repository — thin session wrapper over queries.documents."""
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Document, DocumentChunk
+from queries import count_from
+from queries.documents import (
+    select_document,
+    select_document_chunks,
+    select_document_count,
+    select_documents,
+    select_total_storage,
+    soft_delete_document,
+    update_document_fields,
+    update_document_status,
+)
 
 
 class DocumentRepository:
@@ -20,13 +31,7 @@ class DocumentRepository:
         return doc
 
     async def get_by_id(self, document_id: UUID, tenant_id: UUID) -> Optional[Document]:
-        result = await self.db.execute(
-            select(Document).where(and_(
-                Document.id == document_id,
-                Document.tenant_id == tenant_id,
-                Document.deleted_at.is_(None),
-            ))
-        )
+        result = await self.db.execute(select_document(document_id, tenant_id))
         return result.scalar_one_or_none()
 
     async def list(
@@ -39,27 +44,10 @@ class DocumentRepository:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[Document], int]:
-        base_q = select(Document).where(and_(
-            Document.tenant_id == tenant_id,
-            Document.deleted_at.is_(None),
-        ))
-        if status:
-            base_q = base_q.where(Document.status == status)
-        if tags:
-            from sqlalchemy.dialects.postgresql import ARRAY
-            base_q = base_q.where(Document.tags.overlap(tags))
-        if uploaded_by:
-            base_q = base_q.where(Document.uploaded_by == uploaded_by)
-
-        count_result = await self.db.execute(
-            select(func.count()).select_from(base_q.subquery())
-        )
-        total = count_result.scalar_one()
-
-        items_result = await self.db.execute(
-            base_q.order_by(Document.created_at.desc()).limit(limit).offset(offset)
-        )
-        return list(items_result.scalars().all()), total
+        base = select_documents(tenant_id, status=status, tags=tags, uploaded_by=uploaded_by)
+        total = await count_from(self.db, base.subquery())
+        result = await self.db.execute(base.limit(limit).offset(offset))
+        return list(result.scalars().all()), total
 
     async def update_status(
         self,
@@ -68,34 +56,16 @@ class DocumentRepository:
         error_message: Optional[str] = None,
         **extra_fields,
     ) -> None:
-        values = {"status": status}
-        if error_message is not None:
-            values["error_message"] = error_message
-        values.update(extra_fields)
         await self.db.execute(
-            update(Document).where(Document.id == document_id).values(**values)
+            update_document_status(document_id, status, error_message=error_message, **extra_fields)
         )
 
     async def soft_delete(self, document_id: UUID, tenant_id: UUID) -> bool:
-        from datetime import UTC, datetime
-        result = await self.db.execute(
-            update(Document)
-            .where(and_(
-                Document.id == document_id,
-                Document.tenant_id == tenant_id,
-                Document.deleted_at.is_(None),
-            ))
-            .values(deleted_at=datetime.now(UTC))
-        )
+        result = await self.db.execute(soft_delete_document(document_id, tenant_id))
         return result.rowcount > 0
 
     async def update(self, document_id: UUID, tenant_id: UUID, **kwargs) -> Optional[Document]:
-        await self.db.execute(
-            update(Document).where(and_(
-                Document.id == document_id,
-                Document.tenant_id == tenant_id,
-            )).values(**kwargs)
-        )
+        await self.db.execute(update_document_fields(document_id, tenant_id, **kwargs))
         return await self.get_by_id(document_id, tenant_id)
 
     async def create_chunks(self, chunks: list[dict]) -> list[DocumentChunk]:
@@ -105,19 +75,11 @@ class DocumentRepository:
         return chunk_objects
 
     async def get_chunks(self, document_id: UUID, tenant_id: UUID) -> list[DocumentChunk]:
-        result = await self.db.execute(
-            select(DocumentChunk).where(and_(
-                DocumentChunk.document_id == document_id,
-                DocumentChunk.tenant_id == tenant_id,
-            )).order_by(DocumentChunk.chunk_index)
-        )
+        result = await self.db.execute(select_document_chunks(document_id, tenant_id))
         return list(result.scalars().all())
 
     async def get_total_storage_used(self, tenant_id: UUID) -> int:
-        result = await self.db.execute(
-            select(func.coalesce(func.sum(Document.file_size_bytes), 0)).where(and_(
-                Document.tenant_id == tenant_id,
-                Document.deleted_at.is_(None),
-            ))
-        )
-        return result.scalar_one()
+        return await self.db.scalar(select_total_storage(tenant_id)) or 0
+
+    async def get_document_count(self, tenant_id: UUID, *, status: Optional[str] = None) -> int:
+        return await self.db.scalar(select_document_count(tenant_id, status=status)) or 0

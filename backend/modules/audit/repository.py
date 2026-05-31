@@ -1,12 +1,14 @@
-"""Audit repository — corrected to use AuditLog.metadata_ (ORM field name)."""
+"""Audit repository — thin session wrapper over queries.audit."""
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import AuditLog
+from queries import count_from
+from queries.audit import select_audit_logs
 
 
 class AuditRepository:
@@ -38,7 +40,7 @@ class AuditRepository:
             ip_address=ip_address,
             user_agent=user_agent,
             request_id=request_id,
-            metadata_=metadata or {},   # ORM maps metadata_ → "metadata" column
+            metadata_=metadata or {},
             status=status,
         )
         self.db.add(log)
@@ -57,22 +59,14 @@ class AuditRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[AuditLog], int]:
-        q = select(AuditLog).where(AuditLog.tenant_id == tenant_id)
-        if actor_id:
-            q = q.where(AuditLog.actor_id == actor_id)
-        if action:
-            q = q.where(AuditLog.action == action)
-        if resource_type:
-            q = q.where(AuditLog.resource_type == resource_type)
-        if since:
-            q = q.where(AuditLog.created_at >= since)
-        if until:
-            q = q.where(AuditLog.created_at <= until)
-
-        total = await self.db.scalar(
-            select(func.count()).select_from(q.subquery())
+        base = select_audit_logs(
+            tenant_id,
+            actor_id=actor_id,
+            action=action,
+            resource_type=resource_type,
+            since=since,
+            until=until,
         )
-        result = await self.db.execute(
-            q.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
-        )
-        return list(result.scalars().all()), total or 0
+        total = await count_from(self.db, base.subquery())
+        result = await self.db.execute(base.limit(limit).offset(offset))
+        return list(result.scalars().all()), total

@@ -25,14 +25,7 @@ logger = structlog.get_logger(__name__)
 )
 def generate_embeddings(self: Task, document_id: str, tenant_id: str) -> dict:
     """Generate OpenAI embeddings for all chunks and persist via ORM."""
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(
-        _generate_embeddings_async(self, document_id, tenant_id)
-    )
+    return asyncio.run(_generate_embeddings_async(self, document_id, tenant_id))
 
 
 async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> dict:

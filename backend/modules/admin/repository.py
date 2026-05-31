@@ -1,8 +1,12 @@
-"""Admin repository — platform-wide ORM aggregations (superadmin only)."""
-from sqlalchemy import and_, func, select
+"""Admin repository — thin session wrapper over queries.analytics (platform-wide)."""
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Document, Tenant, User
+from queries.analytics import (
+    select_platform_document_count,
+    select_platform_tenant_count,
+    select_platform_total_storage,
+    select_platform_user_count,
+)
 
 
 class AdminRepository:
@@ -10,34 +14,18 @@ class AdminRepository:
         self.db = db
 
     async def get_platform_stats(self) -> dict:
-        tenant_count = await self.db.scalar(
-            select(func.count(Tenant.id)).where(Tenant.deleted_at.is_(None))
-        )
-        user_count = await self.db.scalar(
-            select(func.count(User.id)).where(User.deleted_at.is_(None))
-        )
-        doc_count = await self.db.scalar(
-            select(func.count(Document.id)).where(Document.deleted_at.is_(None))
-        )
-        storage_total = await self.db.scalar(
-            select(func.coalesce(func.sum(Document.file_size_bytes), 0)).where(
-                Document.deleted_at.is_(None)
-            )
-        )
-        docs_failed = await self.db.scalar(
-            select(func.count(Document.id)).where(
-                and_(
-                    Document.status == "failed",
-                    Document.deleted_at.is_(None),
-                )
-            )
-        )
+        tenant_count = await self.db.scalar(select_platform_tenant_count()) or 0
+        user_count = await self.db.scalar(select_platform_user_count()) or 0
+        doc_count = await self.db.scalar(select_platform_document_count()) or 0
+        storage_total = await self.db.scalar(select_platform_total_storage()) or 0
+        docs_failed = await self.db.scalar(select_platform_document_count(status="failed")) or 0
+
         return {
-            "tenants": tenant_count or 0,
-            "users": user_count or 0,
+            "tenants": tenant_count,
+            "users": user_count,
             "documents": {
-                "total": doc_count or 0,
-                "failed": docs_failed or 0,
+                "total": doc_count,
+                "failed": docs_failed,
             },
-            "storage_bytes": storage_total or 0,
+            "storage_bytes": storage_total,
         }
