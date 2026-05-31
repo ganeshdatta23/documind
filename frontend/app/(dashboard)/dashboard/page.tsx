@@ -3,7 +3,6 @@
 import {
   FileText,
   MessageSquare,
-  Search,
   Users,
   TrendingUp,
   HardDrive,

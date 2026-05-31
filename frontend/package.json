@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "tsx scripts/generate-api.ts --safe",
     "dev": "next dev",
+    "prebuild": "tsx scripts/generate-api.ts --safe",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
