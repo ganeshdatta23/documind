@@ -4,7 +4,7 @@
  */
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { streamChatMessage } from "@/lib/api";
 import type { Citation } from "@/lib/api-client";
@@ -24,6 +24,28 @@ export function useRAGChat(conversationId: string) {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const qc = useQueryClient();
+
+  // Reset the transcript when the conversation changes. Done during render (the
+  // React-endorsed "adjust state on prop change" pattern) rather than in an
+  // effect, so there's no extra commit/cascade. The previously streaming
+  // request is aborted in its own cleanup effect below.
+  const [activeConvId, setActiveConvId] = useState(conversationId);
+  if (conversationId !== activeConvId) {
+    setActiveConvId(conversationId);
+    setMessages([]);
+    setError(null);
+    setIsSending(false);
+  }
+
+  // Abort any in-flight stream when the conversation changes or on unmount.
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, [conversationId]);
+
+  /** Replace the transcript with persisted history (used on initial load). */
+  const hydrate = useCallback((history: StreamingMessage[]) => {
+    setMessages(history);
+  }, []);
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -120,5 +142,5 @@ export function useRAGChat(conversationId: string) {
     setError(null);
   }, []);
 
-  return { messages, isSending, error, sendMessage, cancelStream, clearMessages };
+  return { messages, isSending, error, sendMessage, cancelStream, clearMessages, hydrate };
 }

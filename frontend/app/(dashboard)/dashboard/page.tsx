@@ -1,304 +1,143 @@
 "use client";
 
-import {
-  FileText,
-  MessageSquare,
-  Users,
-  TrendingUp,
-  HardDrive,
-  Activity,
-  Zap,
-} from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { analyticsClient } from "@/lib/api-client";
-import { formatBytes, formatRelativeTime } from "@/lib/utils";
+import Link from "next/link";
+import { FileText, MessageSquare, Users, HardDrive, Zap, ArrowUpRight } from "lucide-react";
+import { useOverview, useActivity } from "@/hooks/useAnalytics";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useConversations } from "@/hooks/useConversations";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { Stat } from "@/components/ui/Stat";
+import { AreaTrend } from "@/components/charts/AreaTrend";
+import { StaggerList, StaggerItem } from "@/components/motion/Stagger";
+import { formatBytes, formatRelativeTime } from "@/lib/utils";
 
-// ─── Stat Card ───────────────────────────────────────────────────────────────
-
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  trend,
-  color = "sky",
-}: {
-  label: string;
-  value: string | number;
-  icon: React.ElementType;
-  trend?: string;
-  color?: "sky" | "indigo" | "emerald" | "amber";
-}) {
-  const colors = {
-    sky: "from-sky-500/20 to-sky-500/5 border-sky-500/20 text-sky-400",
-    indigo: "from-indigo-500/20 to-indigo-500/5 border-indigo-500/20 text-indigo-400",
-    emerald: "from-emerald-500/20 to-emerald-500/5 border-emerald-500/20 text-emerald-400",
-    amber: "from-amber-500/20 to-amber-500/5 border-amber-500/20 text-amber-400",
-  };
-  return (
-    <div className={`glass rounded-2xl border p-5 bg-gradient-to-br ${colors[color]} hover:scale-[1.02] transition-transform duration-200`}>
-      <div className="flex items-start justify-between mb-4">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-current/10`}>
-          <Icon className="w-5 h-5" />
-        </div>
-        {trend && (
-          <span className="text-xs text-slate-500 flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> {trend}
-          </span>
-        )}
-      </div>
-      <p className="text-2xl font-bold text-white mb-1">{value}</p>
-      <p className="text-sm text-slate-400">{label}</p>
-    </div>
-  );
-}
-
-// ─── Document Status Badge ────────────────────────────────────────────────────
-
-const STATUS_COLORS: Record<string, string> = {
-  ready: "text-emerald-400 bg-emerald-400/10",
-  pending: "text-amber-400 bg-amber-400/10",
-  failed: "text-red-400 bg-red-400/10",
-  processing: "text-blue-400 bg-blue-400/10",
+const STATUS_TONE: Record<string, "success" | "warn" | "danger" | "info" | "neutral"> = {
+  ready: "success", pending: "warn", failed: "danger", processing: "info",
 };
 
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
-
 export default function DashboardPage() {
-  // Use generated hooks (from codegen) — fallback to manual until generated
-  const { data: overview, isLoading: overviewLoading } = useQuery({
-    queryKey: ["analytics", "overview"],
-    queryFn: () => analyticsClient.overview(),
-    staleTime: 60_000,
-  });
-
-  const { data: activityData } = useQuery({
-    queryKey: ["analytics", "activity"],
-    queryFn: () => analyticsClient.activity(),
-  });
-
-  const { data: docsData, isLoading: docsLoading } = useDocuments({
-    page_size: 5,
-    status: "ready",
-  });
-
+  const { data: overview, isLoading } = useOverview();
+  const { data: activityData } = useActivity(30);
+  const { data: docsData, isLoading: docsLoading } = useDocuments({ page_size: 5, status: "ready" });
   const { data: convsData } = useConversations({ page_size: 5 });
 
   return (
-    <div className="space-y-8 fade-in">
-      {/* ── Header ────────────────────────────────────────── */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Overview of your workspace activity
-        </p>
+    <div className="space-y-8">
+      <PageHeader eyebrow="Overview" title="Dashboard" subtitle="A clear look at your workspace today." />
+
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        <Stat label="Documents" value={(overview?.documents.total ?? 0).toLocaleString()} icon={FileText} loading={isLoading} />
+        <Stat label="Queries today" value={(overview?.queries.today ?? 0).toLocaleString()} icon={Zap} loading={isLoading} />
+        <Stat label="Team" value={(overview?.users.total ?? 0).toLocaleString()} icon={Users} loading={isLoading} />
+        <Stat label="Storage" value={formatBytes(overview?.storage.used_bytes ?? 0)} icon={HardDrive} loading={isLoading} />
       </div>
 
-      {/* ── Stats ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard
-          label="Total Documents"
-          value={overviewLoading ? "—" : (overview?.documents.total ?? 0).toLocaleString()}
-          icon={FileText}
-          color="sky"
-        />
-        <StatCard
-          label="Queries Today"
-          value={overviewLoading ? "—" : (overview?.queries.today ?? 0).toLocaleString()}
-          icon={Zap}
-          color="indigo"
-        />
-        <StatCard
-          label="Team Members"
-          value={overviewLoading ? "—" : (overview?.users.total ?? 0).toLocaleString()}
-          icon={Users}
-          color="emerald"
-        />
-        <StatCard
-          label="Storage Used"
-          value={overviewLoading ? "—" : formatBytes(overview?.storage.used_bytes ?? 0)}
-          icon={HardDrive}
-          color="amber"
-        />
-      </div>
-
-      {/* ── Activity Chart + Status ──────────────────────── */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Upload Activity */}
-        <div className="xl:col-span-2 glass rounded-2xl border border-slate-800 p-6">
-          <div className="flex items-center justify-between mb-6">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <Card className="xl:col-span-2">
+          <div className="mb-6 flex items-center justify-between">
             <div>
-              <h2 className="text-base font-semibold text-white">Upload Activity</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Documents uploaded per day</p>
+              <h2 className="text-h3 text-fg">Upload activity</h2>
+              <p className="mt-0.5 text-xs text-subtle">Documents added over the last 30 days</p>
             </div>
-            <Activity className="w-4 h-4 text-slate-500" />
           </div>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={activityData?.activity ?? []}>
-                <defs>
-                  <linearGradient id="uploadGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11, fill: "#64748b" }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v) => v.slice(5)}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: "#64748b" }}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "#0f172a",
-                    border: "1px solid #1e293b",
-                    borderRadius: "8px",
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: "#94a3b8" }}
-                  itemStyle={{ color: "#0ea5e9" }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="count"
-                  stroke="#0ea5e9"
-                  strokeWidth={2}
-                  fill="url(#uploadGrad)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          <AreaTrend data={activityData?.activity ?? []} />
+        </Card>
 
-        {/* Processing Status */}
-        <div className="glass rounded-2xl border border-slate-800 p-6">
-          <h2 className="text-base font-semibold text-white mb-1">Processing Status</h2>
-          <p className="text-xs text-slate-500 mb-6">Document pipeline health</p>
+        <Card>
+          <h2 className="text-h3 text-fg">Pipeline</h2>
+          <p className="mb-6 mt-0.5 text-xs text-subtle">Document processing health</p>
           {overview && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {[
-                { label: "Ready", value: overview.documents.ready, color: "bg-emerald-400" },
-                { label: "Processing", value: overview.documents.processing, color: "bg-blue-400" },
-                { label: "Pending", value: overview.documents.pending, color: "bg-amber-400" },
-                { label: "Failed", value: overview.documents.failed, color: "bg-red-400" },
+                { label: "Ready", value: overview.documents.ready, color: "var(--success)" },
+                { label: "Processing", value: overview.documents.processing, color: "var(--info)" },
+                { label: "Pending", value: overview.documents.pending, color: "var(--warn)" },
+                { label: "Failed", value: overview.documents.failed, color: "var(--danger)" },
               ].map(({ label, value, color }) => {
-                const pct = overview.documents.total > 0
-                  ? (value / overview.documents.total) * 100
-                  : 0;
+                const pct = overview.documents.total > 0 ? (value / overview.documents.total) * 100 : 0;
                 return (
                   <div key={label}>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-400">{label}</span>
-                      <span className="text-slate-300 font-medium">{value}</span>
+                    <div className="mb-1.5 flex justify-between text-xs">
+                      <span className="text-muted">{label}</span>
+                      <span className="font-medium tabular-nums text-fg">{value}</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-slate-800">
-                      <div
-                        className={`h-full rounded-full ${color} transition-all duration-700`}
-                        style={{ width: `${pct}%` }}
-                      />
+                    <div className="h-1.5 rounded-full bg-sunken">
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: color }} />
                     </div>
                   </div>
                 );
               })}
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
-      {/* ── Recent Documents + Conversations ─────────────── */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {/* Recent Docs */}
-        <div className="glass rounded-2xl border border-slate-800 p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-base font-semibold text-white">Recent Documents</h2>
-            <a href="/documents" className="text-xs text-sky-400 hover:text-sky-300">
-              View all →
-            </a>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <Card>
+          <div className="mb-5 flex items-center justify-between">
+            <h2 className="text-h3 text-fg">Recent documents</h2>
+            <Link href="/documents" className="flex items-center gap-1 text-xs text-accent hover:underline">
+              View all <ArrowUpRight className="h-3 w-3" />
+            </Link>
           </div>
-          <div className="space-y-3">
-            {docsLoading
-              ? Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="h-12 rounded-xl bg-slate-800/50 animate-pulse" />
-                ))
-              : docsData?.items.map((doc) => (
-                  <a
-                    key={doc.id}
-                    href={`/documents/${doc.id}`}
-                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-800/60 transition-colors group"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center flex-shrink-0">
-                      <FileText className="w-4 h-4 text-sky-400" />
+          {docsLoading ? (
+            <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : docsData?.items.length ? (
+            <StaggerList className="space-y-1">
+              {docsData.items.map((doc) => (
+                <StaggerItem key={doc.id}>
+                  <Link href="/documents" className="group flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-sunken">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-sunken text-subtle">
+                      <FileText className="h-4 w-4" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-200 truncate group-hover:text-white transition-colors">
-                        {doc.title}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {formatBytes(doc.file_size_bytes)} · {formatRelativeTime(doc.created_at)}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-fg">{doc.title}</p>
+                      <p className="text-xs text-subtle">{formatBytes(doc.file_size_bytes)} · {formatRelativeTime(doc.created_at)}</p>
                     </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        STATUS_COLORS[doc.status] ?? STATUS_COLORS.pending
-                      }`}
-                    >
-                      {doc.status}
-                    </span>
-                  </a>
-                ))}
-          </div>
-        </div>
+                    <Badge tone={STATUS_TONE[doc.status] ?? "neutral"} dot>{doc.status}</Badge>
+                  </Link>
+                </StaggerItem>
+              ))}
+            </StaggerList>
+          ) : (
+            <p className="px-2 py-6 text-sm text-subtle">No documents yet.</p>
+          )}
+        </Card>
 
-        {/* Recent Conversations */}
-        <div className="glass rounded-2xl border border-slate-800 p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-base font-semibold text-white">Recent Conversations</h2>
-            <a href="/chat" className="text-xs text-sky-400 hover:text-sky-300">
-              View all →
-            </a>
+        <Card>
+          <div className="mb-5 flex items-center justify-between">
+            <h2 className="text-h3 text-fg">Recent conversations</h2>
+            <Link href="/chat" className="flex items-center gap-1 text-xs text-accent hover:underline">
+              View all <ArrowUpRight className="h-3 w-3" />
+            </Link>
           </div>
-          <div className="space-y-3">
-            {convsData?.items.map((conv) => (
-              <a
-                key={conv.id}
-                href={`/chat/${conv.id}`}
-                className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-800/60 transition-colors group"
-              >
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-                  <MessageSquare className="w-4 h-4 text-indigo-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-200 truncate group-hover:text-white transition-colors">
-                    {conv.title ?? "Untitled conversation"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {conv.message_count} messages ·{" "}
-                    {conv.last_message_at
-                      ? formatRelativeTime(conv.last_message_at)
-                      : "No messages"}
-                  </p>
-                </div>
-              </a>
-            ))}
-            {!convsData?.items.length && (
-              <p className="text-sm text-slate-500 text-center py-6">
-                No conversations yet.{" "}
-                <a href="/chat" className="text-sky-400 hover:underline">
-                  Start one
-                </a>
-              </p>
-            )}
-          </div>
-        </div>
+          {convsData?.items.length ? (
+            <StaggerList className="space-y-1">
+              {convsData.items.map((conv) => (
+                <StaggerItem key={conv.id}>
+                  <Link href={`/chat/${conv.id}`} className="group flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-sunken">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-sunken text-subtle">
+                      <MessageSquare className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-fg">{conv.title ?? "Untitled conversation"}</p>
+                      <p className="text-xs text-subtle">
+                        {conv.message_count} messages · {conv.last_message_at ? formatRelativeTime(conv.last_message_at) : "No messages"}
+                      </p>
+                    </div>
+                  </Link>
+                </StaggerItem>
+              ))}
+            </StaggerList>
+          ) : (
+            <p className="px-2 py-6 text-sm text-subtle">
+              No conversations yet. <Link href="/chat" className="text-accent hover:underline">Start one →</Link>
+            </p>
+          )}
+        </Card>
       </div>
     </div>
   );

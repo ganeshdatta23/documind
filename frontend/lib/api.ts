@@ -131,7 +131,9 @@ export interface SearchSSEEvent {
 
 export function streamSearch(
   query: string,
-  options?: { document_ids?: string[]; top_k?: number },
+  // Mirrors the optional fields of SearchRequest the stream endpoint accepts;
+  // `document_ids` is nullable in the spec (Pydantic Optional → None).
+  options?: { document_ids?: string[] | null; top_k?: number },
   signal?: AbortSignal
 ): AsyncGenerator<SearchSSEEvent> {
   return readSSEStream<SearchSSEEvent>(

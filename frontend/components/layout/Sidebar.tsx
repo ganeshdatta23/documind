@@ -11,11 +11,11 @@ import {
   Settings,
   ChevronLeft,
   Shield,
-  Brain,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -28,6 +28,28 @@ const NAV_ITEMS = [
 
 const ADMIN_NAV = [{ href: "/admin", label: "Admin", icon: Shield }];
 
+function NavLink({
+  href, label, icon: Icon, active, collapsed,
+}: {
+  href: string; label: string; icon: React.ElementType; active: boolean; collapsed: boolean;
+}) {
+  const link = (
+    <Link
+      href={href}
+      className={cn(
+        "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+        active ? "bg-accent-subtle text-fg" : "text-muted hover:bg-sunken hover:text-fg",
+        collapsed && "justify-center"
+      )}
+    >
+      {active && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />}
+      <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "text-accent" : "text-subtle group-hover:text-muted")} />
+      {!collapsed && <span className={cn("truncate", active && "font-medium")}>{label}</span>}
+    </Link>
+  );
+  return collapsed ? <Tooltip label={label} side="right">{link}</Tooltip> : link;
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -36,126 +58,50 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "relative flex flex-col shrink-0 h-full",
-        "bg-slate-950 border-r border-slate-800/60",
-        "transition-all duration-300 ease-in-out",
-        collapsed ? "w-[68px]" : "w-[240px]"
+        "relative flex h-full shrink-0 flex-col border-r border-line bg-canvas transition-all duration-300 ease-in-out",
+        collapsed ? "w-[68px]" : "w-[248px]"
       )}
     >
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-slate-800/60">
-        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center flex-shrink-0">
-          <Brain className="w-4 h-4 text-white" />
+      <div className="flex h-16 items-center gap-2.5 border-b border-line px-5">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-fg text-canvas">
+          <span className="text-[15px] font-bold leading-none">D</span>
         </div>
-        {!collapsed && (
-          <span className="font-bold text-white text-sm tracking-tight">
-            DocuMind
-          </span>
-        )}
+        {!collapsed && <span className="text-[17px] font-semibold tracking-tight text-fg">DocuMind</span>}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + "/");
-          return (
-            <Link
-              key={href}
-              href={href}
-              title={collapsed ? label : undefined}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 group",
-                active
-                  ? "bg-sky-500/10 text-sky-400 border border-sky-500/20"
-                  : "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
-              )}
-            >
-              <Icon
-                className={cn(
-                  "w-4 h-4 flex-shrink-0 transition-colors",
-                  active ? "text-sky-400" : "text-slate-500 group-hover:text-slate-300"
-                )}
-              />
-              {!collapsed && <span className="truncate font-medium">{label}</span>}
-              {!collapsed && active && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-sky-400" />
-              )}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-5">
+        {NAV_ITEMS.map(({ href, label, icon }) => (
+          <NavLink key={href} href={href} label={label} icon={icon} collapsed={collapsed}
+            active={pathname === href || pathname.startsWith(href + "/")} />
+        ))}
 
-        {/* Admin section */}
         {user?.is_superadmin && (
           <>
-            <div className={cn("pt-4 pb-1", !collapsed && "px-3")}>
-              {!collapsed && (
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-600">
-                  Admin
-                </p>
-              )}
-            </div>
-            {ADMIN_NAV.map(({ href, label, icon: Icon }) => {
-              const active = pathname.startsWith(href);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  title={collapsed ? label : undefined}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 group",
-                    active
-                      ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                      : "text-slate-500 hover:text-slate-200 hover:bg-slate-800/60"
-                  )}
-                >
-                  <Icon className="w-4 h-4 flex-shrink-0" />
-                  {!collapsed && <span className="truncate font-medium">{label}</span>}
-                </Link>
-              );
-            })}
+            <div className={cn("pb-1 pt-5", !collapsed && "px-3")}>{!collapsed && <p className="eyebrow">Admin</p>}</div>
+            {ADMIN_NAV.map(({ href, label, icon }) => (
+              <NavLink key={href} href={href} label={label} icon={icon} collapsed={collapsed} active={pathname.startsWith(href)} />
+            ))}
           </>
         )}
       </nav>
 
-      {/* Collapse toggle */}
       <button
         onClick={() => setCollapsed((c) => !c)}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        className={cn(
-          "absolute -right-3 top-20",
-          "w-6 h-6 rounded-full bg-slate-800 border border-slate-700",
-          "flex items-center justify-center",
-          "text-slate-400 hover:text-white hover:bg-slate-700",
-          "transition-all duration-200 shadow-lg z-10"
-        )}
+        className="absolute -right-3 top-[72px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-line-strong bg-surface text-subtle shadow-[var(--shadow-sm)] transition-colors hover:text-fg"
       >
-        <ChevronLeft
-          className={cn(
-            "w-3 h-3 transition-transform duration-300",
-            collapsed && "rotate-180"
-          )}
-        />
+        <ChevronLeft className={cn("h-3 w-3 transition-transform duration-300", collapsed && "rotate-180")} />
       </button>
 
-      {/* User avatar at bottom */}
-      <div className="p-3 border-t border-slate-800/60">
-        <div
-          className={cn(
-            "flex items-center gap-3 px-2 py-2 rounded-xl",
-            "hover:bg-slate-800/60 transition-colors cursor-pointer"
-          )}
-        >
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-400/30 to-indigo-500/30 border border-sky-500/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-xs font-bold text-sky-400">
-              {user?.full_name?.charAt(0)?.toUpperCase() ?? "?"}
-            </span>
+      <div className="border-t border-line p-3">
+        <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-subtle text-accent">
+            <span className="text-xs font-semibold">{user?.full_name?.charAt(0)?.toUpperCase() ?? "?"}</span>
           </div>
           {!collapsed && (
             <div className="min-w-0">
-              <p className="text-xs font-medium text-slate-300 truncate">
-                {user?.full_name}
-              </p>
-              <p className="text-[10px] text-slate-500 truncate">{user?.email}</p>
+              <p className="truncate text-[13px] font-medium text-fg">{user?.full_name}</p>
+              <p className="truncate text-[11px] text-subtle">{user?.email}</p>
             </div>
           )}
         </div>

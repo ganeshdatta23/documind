@@ -40,15 +40,19 @@ export function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength - 3) + "...";
 }
 
-/** Document status display config. */
-export const DOC_STATUS_CONFIG = {
-  pending: { label: "Pending", color: "text-amber-400", bg: "bg-amber-400/10", dot: "bg-amber-400" },
-  parsing: { label: "Parsing", color: "text-blue-400", bg: "bg-blue-400/10", dot: "bg-blue-400" },
-  chunking: { label: "Chunking", color: "text-blue-400", bg: "bg-blue-400/10", dot: "bg-blue-400" },
-  embedding: { label: "Embedding", color: "text-purple-400", bg: "bg-purple-400/10", dot: "bg-purple-400" },
-  ready: { label: "Ready", color: "text-emerald-400", bg: "bg-emerald-400/10", dot: "bg-emerald-400" },
-  failed: { label: "Failed", color: "text-red-400", bg: "bg-red-400/10", dot: "bg-red-400" },
-  archived: { label: "Archived", color: "text-gray-400", bg: "bg-gray-400/10", dot: "bg-gray-400" },
-} as const;
+/**
+ * Document processing states. Display colors live with the components that
+ * render status (via the Badge `tone` system), so this keeps just labels + the
+ * shared `DocStatus` type.
+ */
+export const DOC_STATUS_LABELS: Record<string, string> = {
+  pending: "Pending",
+  parsing: "Parsing",
+  chunking: "Chunking",
+  embedding: "Embedding",
+  ready: "Ready",
+  failed: "Failed",
+  archived: "Archived",
+};
 
-export type DocStatus = keyof typeof DOC_STATUS_CONFIG;
+export type DocStatus = keyof typeof DOC_STATUS_LABELS;

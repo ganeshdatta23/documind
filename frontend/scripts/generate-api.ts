@@ -1,29 +1,43 @@
 #!/usr/bin/env tsx
 /**
- * DocuMind API Code Generator
+ * DocuMind API Type Generator
  * ============================================================
- * Auto-runs before `npm run dev` and `npm run build` via npm lifecycle hooks.
+ * Turns the backend's live OpenAPI spec into TypeScript types. Runs
+ * automatically before `npm run dev` and `npm run build` via npm lifecycle
+ * hooks (predev / prebuild, in --safe mode).
+ *
+ * This is intentionally *types-only*. The spec is the single source of truth
+ * for the SHAPE of the API; the typed REST client (lib/api-client.ts), the SSE
+ * helpers (lib/api.ts), and the React Query hooks (hooks/*.ts) are written once
+ * by hand on top of these types — because streaming, multipart upload progress,
+ * status polling, and bespoke cache keys are things a generator can't express
+ * well. When the API changes, the types regenerate and `tsc` points you at the
+ * one hand-written call site that needs updating.
  *
  * Strategy (in order):
- *   1. Try fetching live spec from --url (default: localhost:8000)
- *   2. Fall back to saved lib/generated/openapi.json if present
- *   3. If neither available, print warning and exit 0 (non-blocking)
+ *   1. Try fetching the live spec from --url (default: localhost:8000)
+ *   2. Fall back to the saved lib/generated/openapi.json snapshot if present
+ *   3. If neither is available, write a placeholder and exit 0 (non-blocking)
  *
  * Usage:
- *   npm run generate-api                      # auto (backend at localhost:8000)
- *   npm run generate-api -- --url http://...  # specific URL
+ *   npm run generate-api                       # auto (backend at localhost:8000)
+ *   npm run generate-api -- --url http://...   # specific URL
  *   npm run generate-api -- --file ./spec.json # specific file
- *   npm run generate-api -- --safe            # never fail (used by predev)
+ *   npm run generate-api -- --safe             # never fail (used by predev)
  *
- * Output:
- *   lib/generated/openapi.json   (spec snapshot)
- *   lib/generated/schema.ts      (all TypeScript types)
- *   lib/generated/client.ts      (typed apiRequest wrappers per operation)
- *   hooks/generated/use{Tag}.ts  (React Query useQuery/useMutation per tag)
- *   hooks/generated/index.ts     (barrel re-export)
+ * Output (the only two files written):
+ *   lib/generated/schema.ts      all TypeScript types, derived from the spec
+ *   lib/generated/openapi.json   spec snapshot (offline fallback + drift check)
+ *
+ * Output is deterministic — no timestamps — so the committed files only change
+ * when the API genuinely changes, not on every dev start.
  * ============================================================
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * This is a build-time script that walks an untyped OpenAPI JSON document. Every
+ * spec node is dynamically shaped, so `any` is the pragmatic type here rather
+ * than threading a partial OpenAPI type model through a throwaway generator. */
 import fs from "fs";
 import path from "path";
 import http from "http";
@@ -44,7 +58,7 @@ const LOCAL_FILE = getArg("--file");
 
 const ROOT = path.resolve(__dirname, "..");
 const GENERATED_LIB = path.join(ROOT, "lib", "generated");
-const GENERATED_HOOKS = path.join(ROOT, "hooks", "generated");
+const SCHEMA_PATH = path.join(GENERATED_LIB, "schema.ts");
 const SNAPSHOT_PATH = path.join(GENERATED_LIB, "openapi.json");
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -88,19 +102,26 @@ function fetchJson(url: string, timeoutMs = 5000): Promise<any> {
 function schemaToTs(schema: any, depth = 0): string {
   if (!schema) return "unknown";
   if (schema.$ref) {
-    const name = schema.$ref.split("/").pop()!;
-    return name;
+    // "#/components/schemas/Foo" → "Foo"
+    return schema.$ref.split("/").pop()!;
   }
+  // FastAPI/Pydantic v2 emit OpenAPI 3.1, where a nullable field is modelled as
+  // anyOf: [ {real type}, {type: "null"} ]. Mapping each branch (and handling
+  // the "null" type below) is what turns that into a clean `T | null` instead
+  // of the lossy `T | unknown` an unrecognised branch would produce.
   if (schema.anyOf || schema.oneOf) {
-    return (schema.anyOf ?? schema.oneOf)
-      .map((s: any) => schemaToTs(s, depth))
-      .join(" | ");
+    const parts = (schema.anyOf ?? schema.oneOf).map((s: any) =>
+      schemaToTs(s, depth)
+    );
+    // De-dupe so anyOf:[string, null, null] doesn't become "string | null | null".
+    return Array.from(new Set(parts)).join(" | ");
   }
   switch (schema.type) {
+    case "null":
+      return "null";
     case "string":
-      if (schema.enum)
-        return schema.enum.map((e: string) => `"${e}"`).join(" | ");
-      return schema.format === "date-time" ? "string" : "string";
+      // date-time, uuid, etc. all serialise as strings over the wire.
+      return "string";
     case "integer":
     case "number":
       return "number";
@@ -113,12 +134,17 @@ function schemaToTs(schema: any, depth = 0): string {
       const pad = "  ".repeat(depth + 1);
       const fields = Object.entries<any>(schema.properties).map(([k, v]) => {
         const opt = schema.required?.includes(k) ? "" : "?";
-        const nullable = v.nullable ? " | null" : "";
+        const nullable = v.nullable ? " | null" : ""; // OpenAPI 3.0 fallback
         return `${pad}${k}${opt}: ${schemaToTs(v, depth + 1)}${nullable};`;
       });
       return `{\n${fields.join("\n")}\n${"  ".repeat(depth)}}`;
     }
     default:
+      // enums show up as type:string with an `enum` array; handled by the
+      // string case above for inline use, and by generateSchemaTs at top level.
+      if (schema.enum) {
+        return schema.enum.map((e: string) => `"${e}"`).join(" | ");
+      }
       return "unknown";
   }
 }
@@ -126,16 +152,19 @@ function schemaToTs(schema: any, depth = 0): string {
 function generateSchemaTs(spec: any): string {
   const schemas = spec.components?.schemas ?? {};
   const lines: string[] = [
-    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
-    `// Source: ${spec.info?.title} v${spec.info?.version}`,
-    `// Generated: ${new Date().toISOString()}`,
+    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually.",
+    `// Source: ${spec.info?.title ?? "API"} v${spec.info?.version ?? "?"}`,
+    "// These are the single source of truth for API shapes; lib/types.ts aliases",
+    "// them and the hand-written client/hooks build on top.",
     "",
   ];
 
   for (const [name, schema] of Object.entries<any>(schemas)) {
     if (schema.enum) {
       lines.push(
-        `export type ${name} = ${schema.enum.map((e: string) => `"${e}"`).join(" | ")};`
+        `export type ${name} = ${schema.enum
+          .map((e: string) => `"${e}"`)
+          .join(" | ")};`
       );
       lines.push("");
       continue;
@@ -166,7 +195,7 @@ function generateSchemaTs(spec: any): string {
       lines.push(`export interface ${name} {`);
       for (const [k, v] of Object.entries<any>(props)) {
         const opt = required.includes(k) ? "" : "?";
-        const nullable = v.nullable ? " | null" : "";
+        const nullable = v.nullable ? " | null" : ""; // OpenAPI 3.0 fallback
         lines.push(`  ${k}${opt}: ${schemaToTs(v)}${nullable};`);
       }
       lines.push("}");
@@ -176,269 +205,33 @@ function generateSchemaTs(spec: any): string {
   return lines.join("\n");
 }
 
-// ─── Operations ───────────────────────────────────────────────────────────────
+// ─── Placeholder (when the backend is unavailable on a fresh checkout) ─────────
 
-interface Op {
-  operationId: string;
-  method: string;
-  path: string;
-  tag: string;
-  summary: string;
-  pathParams: string[];
-  queryParams: Array<{ name: string; required: boolean; type: string }>;
-  hasBody: boolean;
-  bodyType: string;
-  returnType: string;
-}
-
-function sanitizeId(s: string): string {
-  return s.replace(/[-\s]/g, "_").replace(/[^a-zA-Z0-9_]/g, "");
-}
-
-function deriveId(method: string, rawPath: string): string {
-  const cleaned = rawPath
-    .replace(/^\/api\/v\d+\//, "")
-    .split("/")
-    .map((p) =>
-      p.startsWith("{")
-        ? "By" + p.slice(1, -1).charAt(0).toUpperCase() + p.slice(2, -1)
-        : p.charAt(0).toUpperCase() + p.slice(1)
-    )
-    .join("");
-  return method.toLowerCase() + cleaned;
-}
-
-function extractOps(spec: any): Op[] {
-  const ops: Op[] = [];
-  for (const [rawPath, pathItem] of Object.entries<any>(spec.paths ?? {})) {
-    for (const method of ["get", "post", "put", "patch", "delete"]) {
-      const op = pathItem[method];
-      if (!op) continue;
-
-      const tag = sanitizeId(op.tags?.[0] ?? rawPath.split("/")[3] ?? "api");
-      const operationId = sanitizeId(
-        op.operationId ?? deriveId(method, rawPath)
-      );
-
-      const pathParams = (rawPath.match(/\{([^}]+)\}/g) ?? []).map((p: string) =>
-        p.slice(1, -1)
-      );
-      const queryParams = (op.parameters ?? [])
-        .filter((p: any) => p.in === "query")
-        .map((p: any) => ({
-          name: p.name,
-          required: !!p.required,
-          type: schemaToTs(p.schema),
-        }));
-
-      const bodySchema =
-        op.requestBody?.content?.["application/json"]?.schema;
-      const bodyRef = bodySchema?.$ref?.split("/").pop();
-      const bodyType = bodyRef ? `Schema.${bodyRef}` : bodySchema ? "Record<string, unknown>" : "";
-
-      const resp =
-        op.responses?.["200"]?.content?.["application/json"]?.schema ??
-        op.responses?.["201"]?.content?.["application/json"]?.schema;
-      const respRef = resp?.$ref?.split("/").pop();
-      const returnType = respRef ? `Schema.${respRef}` : resp ? "unknown" : "void";
-
-      ops.push({
-        operationId,
-        method,
-        path: rawPath,
-        tag,
-        summary: op.summary ?? "",
-        pathParams,
-        queryParams,
-        hasBody: !!op.requestBody,
-        bodyType,
-        returnType,
-      });
-    }
-  }
-  return ops;
-}
-
-// ─── Client Generator ────────────────────────────────────────────────────────
-
-function generateClientTs(ops: Op[], spec: any): string {
-  const lines: string[] = [
-    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
-    `// Generated: ${new Date().toISOString()}`,
-    "",
-    'import type * as Schema from "./schema";',
-    'import { apiRequest } from "../http-client";',
-    "",
-  ];
-
-  const byTag: Record<string, Op[]> = {};
-  for (const op of ops) {
-    byTag[op.tag] = byTag[op.tag] ?? [];
-    byTag[op.tag].push(op);
-  }
-
-  for (const [tag, tagOps] of Object.entries(byTag)) {
-    lines.push(`// ─── ${tag} ─────────────────────────────────────────────`);
-    for (const op of tagOps) {
-      const args: string[] = [];
-      if (op.pathParams.length)
-        args.push(`pathParams: { ${op.pathParams.map((p) => `${p}: string`).join("; ")} }`);
-      if (op.hasBody && op.bodyType)
-        args.push(`body: ${op.bodyType}`);
-      if (op.queryParams.length) {
-        const qt = op.queryParams
-          .map((q) => `${q.name}${q.required ? "" : "?"}: ${q.type}`)
-          .join("; ");
-        args.push(`query?: { ${qt} }`);
-      }
-
-      const urlExpr = op.pathParams.length
-        ? `\`${op.path.replace(/{([^}]+)}/g, "${pathParams.$1}")}\``
-        : `"${op.path}"`;
-
-      lines.push(`/** ${op.summary} */`);
-      lines.push(`export async function ${op.operationId}(${args.join(", ")}): Promise<${op.returnType}> {`);
-      lines.push(`  return apiRequest<${op.returnType}>({`);
-      lines.push(`    method: "${op.method.toUpperCase()}",`);
-      lines.push(`    url: ${urlExpr},`);
-      if (op.hasBody) lines.push("    body,");
-      if (op.queryParams.length) lines.push("    params: query,");
-      lines.push("  });");
-      lines.push("}");
-      lines.push("");
-    }
-  }
-  return lines.join("\n");
-}
-
-// ─── Hook Generator ───────────────────────────────────────────────────────────
-
-const QUERY_METHODS = new Set(["get"]);
-
-function generateHookFile(tag: string, ops: Op[]): string {
-  const lines: string[] = [
-    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
-    `// Generated: ${new Date().toISOString()}`,
-    "",
-    '"use client";',
-    "",
-    'import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";',
-    `import * as api from "@/lib/generated/client";`,
-    `import type * as Schema from "@/lib/generated/schema";`,
-    "",
-  ];
-
-  // Query key map
-  const lower = tag.toLowerCase();
-  lines.push(`export const ${lower}Keys = {`);
-  lines.push(`  all: ["${lower}"] as const,`);
-  for (const op of ops.filter((o) => QUERY_METHODS.has(o.method))) {
-    if (op.pathParams.length) {
-      const pl = op.pathParams.map((p) => `${p}: string`).join(", ");
-      const pv = op.pathParams.join(", ");
-      lines.push(`  ${op.operationId}: (${pl}) => [...${lower}Keys.all, "${op.operationId}", ${pv}] as const,`);
-    } else {
-      lines.push(`  ${op.operationId}: (params?: object) => [...${lower}Keys.all, "${op.operationId}", params] as const,`);
-    }
-  }
-  lines.push("} as const;", "");
-
-  for (const op of ops) {
-    const hookName =
-      "use" + op.operationId.charAt(0).toUpperCase() + op.operationId.slice(1);
-
-    if (QUERY_METHODS.has(op.method)) {
-      const fnArgs: string[] = [];
-      if (op.pathParams.length)
-        fnArgs.push(...op.pathParams.map((p) => `${p}: string`));
-      if (op.queryParams.length) {
-        const qt = op.queryParams.map((q) => `${q.name}${q.required ? "" : "?"}: ${q.type}`).join("; ");
-        fnArgs.push(`params?: { ${qt} }`);
-      }
-
-      const keyCall = op.pathParams.length
-        ? `${lower}Keys.${op.operationId}(${op.pathParams.join(", ")})`
-        : `${lower}Keys.${op.operationId}(${op.queryParams.length ? "params" : ""})`;
-
-      const apiFnArgs: string[] = [];
-      if (op.pathParams.length) apiFnArgs.push(`{ ${op.pathParams.join(", ")} }`);
-      if (op.queryParams.length) apiFnArgs.push("params");
-
-      const enabledGuard = op.pathParams.length
-        ? `enabled: ${op.pathParams.map((p) => `!!${p}`).join(" && ")},`
-        : "";
-
-      lines.push(`/** ${op.summary} */`);
-      lines.push(`export function ${hookName}(${fnArgs.join(", ")}) {`);
-      lines.push("  return useQuery({");
-      lines.push(`    queryKey: ${keyCall},`);
-      lines.push(`    queryFn: () => api.${op.operationId}(${apiFnArgs.join(", ")}),`);
-      if (enabledGuard) lines.push(`    ${enabledGuard}`);
-      lines.push("    staleTime: 30_000,");
-      lines.push("  });");
-      lines.push("}");
-      lines.push("");
-    } else {
-      lines.push(`/** ${op.summary} */`);
-      lines.push(`export function ${hookName}() {`);
-      lines.push("  const qc = useQueryClient();");
-      lines.push("  return useMutation({");
-      lines.push(`    mutationFn: api.${op.operationId},`);
-      lines.push("    onSuccess: () => {");
-      lines.push(`      qc.invalidateQueries({ queryKey: ${lower}Keys.all });`);
-      lines.push("    },");
-      lines.push("  });");
-      lines.push("}");
-      lines.push("");
-    }
-  }
-  return lines.join("\n");
-}
-
-// ─── Placeholder generator (when backend is unavailable) ──────────────────────
-
-function generatePlaceholders() {
+function generatePlaceholder() {
   mkdirp(GENERATED_LIB);
-  mkdirp(GENERATED_HOOKS);
-
-  const schemaPlaceholder = [
-    "// AUTO-GENERATED placeholder — run `npm run generate-api` with backend running",
-    "// This file will be replaced when the backend is available.",
-    "",
-    "export interface Placeholder { _placeholder: true }",
-  ].join("\n");
-
-  const clientPlaceholder = [
-    "// AUTO-GENERATED placeholder — run `npm run generate-api` with backend running",
-    "",
-    'import { apiRequest } from "../http-client";',
-    "",
-    "// No operations available — start backend and run: npm run generate-api",
-  ].join("\n");
-
-  const indexPlaceholder = [
-    "// AUTO-GENERATED placeholder — run `npm run generate-api` with backend running",
-  ].join("\n");
-
-  // Only write placeholders if files don't already exist
-  if (!fs.existsSync(path.join(GENERATED_LIB, "schema.ts")))
-    write(path.join(GENERATED_LIB, "schema.ts"), schemaPlaceholder);
-  if (!fs.existsSync(path.join(GENERATED_LIB, "client.ts")))
-    write(path.join(GENERATED_LIB, "client.ts"), clientPlaceholder);
-  if (!fs.existsSync(path.join(GENERATED_HOOKS, "index.ts")))
-    write(path.join(GENERATED_HOOKS, "index.ts"), indexPlaceholder);
+  // Only write a placeholder if there's nothing there yet — never clobber a
+  // real, previously-generated schema.
+  if (fs.existsSync(SCHEMA_PATH)) return;
+  write(
+    SCHEMA_PATH,
+    [
+      "// AUTO-GENERATED placeholder — run `npm run generate-api` with the backend running.",
+      "// This file will be replaced once the backend's OpenAPI spec is reachable.",
+      "",
+      "export interface Placeholder { _placeholder: true }",
+    ].join("\n")
+  );
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("\n🚀  DocuMind API Codegen");
+  console.log("\n🚀  DocuMind API Type Codegen");
   console.log("─".repeat(50));
 
   mkdirp(GENERATED_LIB);
-  mkdirp(GENERATED_HOOKS);
 
-  // 1. Load OpenAPI spec
+  // 1. Load the OpenAPI spec.
   let spec: any = null;
 
   if (LOCAL_FILE) {
@@ -456,7 +249,7 @@ async function main() {
       console.log(`✔   Connected to backend`);
     } catch (err: any) {
       console.warn(`⚠   Backend unavailable: ${err.message}`);
-      // Try snapshot fallback
+      // Fall back to the committed snapshot so offline builds still type-check.
       if (fs.existsSync(SNAPSHOT_PATH)) {
         console.log(`📦  Using cached snapshot: ${SNAPSHOT_PATH}`);
         try {
@@ -468,14 +261,14 @@ async function main() {
     }
   }
 
-  // 2. Graceful fallback
+  // 2. Graceful fallback when there's no spec at all.
   if (!spec) {
     if (SAFE_MODE) {
       console.warn(
-        "\n⚠   No spec available — writing placeholder files.\n" +
-        "    Start the backend and run: npm run generate-api\n"
+        "\n⚠   No spec available — writing a placeholder.\n" +
+          "    Start the backend and run: npm run generate-api\n"
       );
-      generatePlaceholders();
+      generatePlaceholder();
       process.exit(0);
     } else {
       console.error("\n❌  No spec available. Use --safe to skip gracefully.");
@@ -483,61 +276,28 @@ async function main() {
     }
   }
 
+  const schemaCount = Object.keys(spec.components?.schemas ?? {}).length;
+  const pathCount = Object.keys(spec.paths ?? {}).length;
   console.log(`✔   Loaded: ${spec.info?.title} v${spec.info?.version}`);
-  console.log(`    Paths: ${Object.keys(spec.paths ?? {}).length}  |  Schemas: ${Object.keys(spec.components?.schemas ?? {}).length}`);
+  console.log(`    Paths: ${pathCount}  |  Schemas: ${schemaCount}`);
   console.log("");
 
-  // 3. Extract operations
-  const ops = extractOps(spec);
-  const byTag: Record<string, Op[]> = {};
-  for (const op of ops) {
-    byTag[op.tag] = byTag[op.tag] ?? [];
-    byTag[op.tag].push(op);
-  }
-  console.log(`📋  ${ops.length} operations across ${Object.keys(byTag).length} tags`);
-  console.log("");
-
-  // 4. Generate schema.ts
+  // 3. Generate the types.
   console.log("📝  Generating schema types…");
-  write(path.join(GENERATED_LIB, "schema.ts"), generateSchemaTs(spec));
+  write(SCHEMA_PATH, generateSchemaTs(spec));
 
-  // 5. Generate client.ts
-  console.log("🔌  Generating API client…");
-  write(path.join(GENERATED_LIB, "client.ts"), generateClientTs(ops, spec));
-
-  // 6. Generate hooks per tag
-  console.log("🪝  Generating React Query hooks…");
-  const hookTags: string[] = [];
-  for (const [tag, tagOps] of Object.entries(byTag)) {
-    const normalized = tag.charAt(0).toUpperCase() + tag.slice(1);
-    write(
-      path.join(GENERATED_HOOKS, `use${normalized}.ts`),
-      generateHookFile(normalized, tagOps)
-    );
-    hookTags.push(normalized);
-  }
-
-  // 7. Barrel export
-  const barrel = [
-    "// AUTO-GENERATED by scripts/generate-api.ts — do not edit manually",
-    `// Generated: ${new Date().toISOString()}`,
-    "",
-    ...hookTags.map((tag) => `export * from "./use${tag}";`),
-  ].join("\n");
-  write(path.join(GENERATED_HOOKS, "index.ts"), barrel);
-
-  // 8. Save spec snapshot
-  write(SNAPSHOT_PATH, JSON.stringify(spec, null, 2));
+  // 4. Save a pretty-printed snapshot (offline fallback + drift check baseline).
+  write(SNAPSHOT_PATH, JSON.stringify(spec, null, 2) + "\n");
 
   console.log("");
-  console.log(`✅  Codegen complete!  Tags: ${hookTags.join(", ")}`);
+  console.log(`✅  Codegen complete!  ${schemaCount} types written.`);
   console.log("");
 }
 
 main().catch((err) => {
   if (SAFE_MODE) {
     console.warn(`\n⚠   Codegen failed (safe mode): ${err.message}\n`);
-    generatePlaceholders();
+    generatePlaceholder();
     process.exit(0);
   } else {
     console.error(`\n❌  Codegen failed: ${err.message}`);

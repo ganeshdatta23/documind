@@ -3,14 +3,14 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, LogIn } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { useLogin } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
+  email: z.string().email("Enter a valid email address"),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -24,28 +24,24 @@ export default function LoginPage() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<LoginForm>({
-    resolver: zodResolver(loginSchema),
-  });
+  } = useForm<LoginForm>({ resolver: zodResolver(loginSchema) });
 
   const onSubmit = (data: LoginForm) => login(data);
-
-  const apiError =
-    (error as any)?.response?.data?.error?.message || "Invalid credentials";
+  const apiError = (error as any)?.response?.data?.error?.message || "Invalid email or password";
 
   return (
-    <div className="w-full max-w-md">
-      {/* Logo (mobile) */}
-      <div className="flex items-center gap-3 mb-8 lg:hidden">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center">
-          <LogIn className="w-4 h-4 text-white" />
+    <div className="w-full max-w-sm">
+      {/* mobile wordmark */}
+      <div className="mb-10 flex items-center gap-2.5 lg:hidden">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-fg text-canvas">
+          <span className="text-base font-bold leading-none">D</span>
         </div>
-        <span className="text-lg font-bold text-white">DocuMind</span>
+        <span className="text-lg font-semibold tracking-tight text-fg">DocuMind</span>
       </div>
 
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-white mb-1">Welcome back</h2>
-        <p className="text-slate-400 text-sm">Sign in to your workspace</p>
+        <h2 className="text-h1 text-fg">Welcome back</h2>
+        <p className="mt-1.5 text-sm text-muted">Sign in to your workspace to continue.</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
@@ -68,39 +64,28 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setShowPassword((p) => !p)}
-              className="text-slate-500 hover:text-slate-300 transition-colors"
+              className="text-subtle transition-colors hover:text-muted"
               aria-label={showPassword ? "Hide password" : "Show password"}
             >
-              {showPassword ? (
-                <EyeOff className="w-4 h-4" />
-              ) : (
-                <Eye className="w-4 h-4" />
-              )}
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           }
           {...register("password")}
         />
 
-        {/* API Error */}
         {error && (
-          <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-            <p className="text-sm text-red-400">{apiError}</p>
+          <div className="rounded-lg border border-[color-mix(in_srgb,var(--danger)_30%,transparent)] bg-danger-subtle px-4 py-3">
+            <p className="text-sm text-danger">{apiError}</p>
           </div>
         )}
 
-        <Button
-          type="submit"
-          variant="primary"
-          size="lg"
-          isLoading={isPending}
-          className="w-full mt-2"
-        >
+        <Button type="submit" size="lg" isLoading={isPending} className="mt-2 w-full">
           {isPending ? "Signing in…" : "Sign in"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-xs text-slate-500">
-        Protected by DocuMind enterprise security
+      <p className="mt-8 text-center text-xs text-subtle">
+        Protected by enterprise-grade security · SSO available on request
       </p>
     </div>
   );

@@ -112,7 +112,7 @@ httpClient.interceptors.response.use(
 );
 
 // ─── apiRequest ───────────────────────────────────────────────────────────────
-// Used by lib/api-client.ts and lib/generated/client.ts
+// The thin request helper the hand-written lib/api-client.ts is built on.
 
 export interface ApiRequestOptions {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
