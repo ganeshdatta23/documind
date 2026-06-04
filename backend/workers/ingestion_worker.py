@@ -2,6 +2,8 @@
 Ingestion Worker — Celery task for document processing pipeline.
 Steps: download → parse → chunk → store chunks → enqueue embedding
 """
+from __future__ import annotations
+
 import asyncio
 import traceback
 from uuid import UUID
@@ -51,10 +53,13 @@ def process_document(self: Task, document_id: str, tenant_id: str) -> dict:
 
 async def _process_document_async(task: Task, document_id: str, tenant_id: str) -> dict:
     """Async implementation of the ingestion pipeline."""
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
 
     from database import async_session_factory
     from integrations.storage.local import LocalStorageClient
+    from models import IngestionJob
     from modules.document.repository import DocumentRepository
 
     doc_id = UUID(document_id)
@@ -67,6 +72,31 @@ async def _process_document_async(task: Task, document_id: str, tenant_id: str) 
         if not doc:
             logger.error("ingestion.document_not_found", document_id=document_id)
             return {"status": "error", "reason": "document_not_found"}
+
+        # Track this run as an IngestionJob row for observability/retries.
+        job = IngestionJob(
+            document_id=doc_id,
+            tenant_id=t_id,
+            job_type="full",
+            status="running",
+            celery_task_id=getattr(task.request, "id", None),
+            attempt_count=task.request.retries + 1,
+            started_at=datetime.now(UTC),
+        )
+        db.add(job)
+        await db.flush()
+        job_id = job.id
+
+        async def _finish_job(status: str, error: str | None = None) -> None:
+            await db.execute(
+                update(IngestionJob)
+                .where(IngestionJob.id == job_id)
+                .values(
+                    status=status,
+                    error_message=error,
+                    completed_at=datetime.now(UTC) if status in ("completed", "failed") else None,
+                )
+            )
 
         try:
             # Update status: parsing
@@ -107,6 +137,8 @@ async def _process_document_async(task: Task, document_id: str, tenant_id: str) 
                 queue="embedding",
             )
 
+            await _finish_job("completed")
+            await db.commit()
             logger.info("ingestion.completed", document_id=document_id, chunks=len(chunks))
             return {"status": "chunked", "chunk_count": len(chunks)}
 
@@ -118,6 +150,7 @@ async def _process_document_async(task: Task, document_id: str, tenant_id: str) 
                 traceback=traceback.format_exc(),
             )
             await repo.update_status(doc_id, "failed", error_message=str(exc))
+            await _finish_job("failed", error=str(exc)[:2000])
             await db.commit()
 
             if task.request.retries < task.max_retries:
@@ -169,9 +202,25 @@ def _parse_html(content: bytes) -> str:
     return soup.get_text(separator="\n", strip=True)
 
 
+_TOKEN_ENCODER = None
+
+
+def _count_tokens(text: str) -> int:
+    """Accurate token count via tiktoken, with a word-count fallback."""
+    global _TOKEN_ENCODER
+    try:
+        if _TOKEN_ENCODER is None:
+            import tiktoken
+            _TOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
+        return len(_TOKEN_ENCODER.encode(text))
+    except Exception:
+        # Rough fallback: ~1.3 tokens per whitespace word.
+        return int(len(text.split()) * 1.3)
+
+
 def _chunk_text(text: str, document_id: UUID, tenant_id: UUID) -> list[dict]:
     """
-    Chunk text using recursive character splitter.
+    Chunk text using a recursive character splitter.
     Returns list of chunk dicts ready for DB insertion.
     """
     import hashlib
@@ -194,6 +243,6 @@ def _chunk_text(text: str, document_id: UUID, tenant_id: UUID) -> list[dict]:
             "chunk_index": i,
             "content": chunk_text,
             "content_hash": content_hash,
-            "token_count": len(chunk_text.split()),  # Approximate
+            "token_count": _count_tokens(chunk_text),
         })
     return chunks

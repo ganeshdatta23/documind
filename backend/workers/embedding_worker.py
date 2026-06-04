@@ -3,6 +3,8 @@ Embedding Worker — Generate and store vector embeddings for document chunks.
 Uses ORM (ChunkEmbedding model) for upserts; pgvector column written via
 the special cast required by sqlalchemy-pgvector.
 """
+from __future__ import annotations
+
 import asyncio
 import traceback
 from uuid import UUID
@@ -60,6 +62,13 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
             texts = [c.content for c in chunks]
             embeddings = await _embed_batch(texts)
 
+            # Guard against a partial/misaligned response before persisting —
+            # a mismatch would silently pair chunks with the wrong vectors.
+            if len(embeddings) != len(chunks):
+                raise ValueError(
+                    f"Embedding count mismatch: got {len(embeddings)} for {len(chunks)} chunks"
+                )
+
             # Upsert ChunkEmbedding rows via ORM insert-on-conflict
             # pgvector stores the list[float] as a vector — cast required
             for chunk, vector in zip(chunks, embeddings):
@@ -95,6 +104,14 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
             await repo.update_status(doc_id, "ready")
             await db.commit()
 
+            # Notify subscribers that the document is now queryable.
+            from integrations.events import Events, emit_event
+            await emit_event(
+                db, t_id, Events.DOCUMENT_READY,
+                {"document_id": document_id, "chunk_count": len(chunks), "title": doc.title},
+            )
+            await db.commit()
+
             logger.info(
                 "embedding.completed",
                 document_id=document_id,
@@ -116,6 +133,11 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
 
             if task.request.retries < task.max_retries:
                 raise task.retry(exc=exc, countdown=30 * (2 ** task.request.retries))
+
+            from integrations.events import Events, emit_event
+            await emit_event(db, t_id, Events.DOCUMENT_FAILED,
+                             {"document_id": document_id, "stage": "embedding", "error": str(exc)})
+            await db.commit()
             return {"status": "dead_letter", "error": str(exc)}
 
 
