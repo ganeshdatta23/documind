@@ -1,4 +1,6 @@
 """Alembic environment for async SQLAlchemy migrations."""
+from __future__ import annotations
+
 import asyncio
 from logging.config import fileConfig
 
@@ -12,9 +14,15 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config import settings  # noqa: E402
 from models import Base  # noqa: E402  — must be after sys.path insert
 
 config = context.config
+
+# Always migrate against the same database the app talks to. This keeps the URL
+# in one place (env/settings) so it works locally and inside containers, instead
+# of the hardcoded localhost in alembic.ini.
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
