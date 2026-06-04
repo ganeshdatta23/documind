@@ -1,12 +1,14 @@
 """
 DocuMind FastAPI Dependencies — Centralized DI for auth, tenant, DB, Redis.
 """
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from typing import Annotated
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, Header, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,12 +72,27 @@ class TokenData:
 async def get_token_data(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer_scheme)],
     redis: RedisConn,
+    db: DbSession,
+    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
 ) -> TokenData:
     """
-    Extract and validate JWT token from Authorization header.
-    Raises 401 if token is missing, invalid, expired, or revoked.
+    Authenticate the request via a JWT bearer token OR a DocuMind API key.
+
+    - Authorization: Bearer <jwt>            → standard user session
+    - Authorization: Bearer dm_live_xxx      → API key
+    - X-API-Key: dm_live_xxx                 → API key (header form)
+
+    Raises 401 if no valid credential is present, expired, or revoked.
     """
-    if credentials is None:
+    from security import API_KEY_PREFIX
+
+    raw = credentials.credentials if credentials else None
+    api_key = x_api_key or (raw if raw and raw.startswith(API_KEY_PREFIX) else None)
+
+    if api_key:
+        return await _authenticate_api_key(db, api_key)
+
+    if raw is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "MISSING_TOKEN", "message": "Authorization header required"},
@@ -83,7 +100,7 @@ async def get_token_data(
         )
 
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(raw)
     except JWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -100,6 +117,40 @@ async def get_token_data(
         )
 
     return TokenData(payload)
+
+
+async def _authenticate_api_key(db: AsyncSession, raw_key: str) -> TokenData:
+    """Resolve an API key to a TokenData principal (the key owner's identity)."""
+    from datetime import UTC, datetime
+
+    from modules.apikey.repository import APIKeyRepository
+    from modules.user.repository import UserRepository
+    from security import hash_token
+
+    repo = APIKeyRepository(db)
+    key = await repo.get_active_by_hash(hash_token(raw_key))
+    if not key or (key.expires_at and key.expires_at < datetime.now(UTC)):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "INVALID_API_KEY", "message": "API key is invalid or expired"},
+        )
+
+    user = await UserRepository(db).get_by_id(key.user_id, key.tenant_id)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "INVALID_API_KEY", "message": "API key owner is inactive"},
+        )
+
+    await repo.touch_last_used(key.id)
+    return TokenData({
+        "sub": str(user.id),
+        "tid": str(user.tenant_id),
+        "email": user.email,
+        "roles": [r.name for r in user.roles],
+        "is_superadmin": user.is_superadmin,
+        "jti": f"apikey:{key.id}",
+    })
 
 
 CurrentToken = Annotated[TokenData, Depends(get_token_data)]

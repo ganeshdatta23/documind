@@ -2,6 +2,8 @@
 Tenant middleware — loads and caches tenant context per request.
 Extracts tenant from JWT or X-Tenant-ID header and injects into request state.
 """
+from __future__ import annotations
+
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request

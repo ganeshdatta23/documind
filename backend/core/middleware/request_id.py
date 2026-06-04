@@ -1,4 +1,6 @@
 """Request ID middleware — injects unique X-Request-ID header into every request."""
+from __future__ import annotations
+
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware

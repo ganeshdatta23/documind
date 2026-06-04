@@ -2,6 +2,8 @@
 DocuMind Database — Async SQLAlchemy 2.x engine and session factory.
 Uses asyncpg driver for PostgreSQL.
 """
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from typing import Any
 

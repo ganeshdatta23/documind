@@ -2,7 +2,8 @@
 DocuMind FastAPI Application — Main entry point.
 Configures middleware, routers, lifespan, and exception handlers.
 """
-import time
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 
 import structlog
@@ -12,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from core.exceptions import DocuMindError
-from database import close_db, init_db
+from database import close_db
 from redis_client import close_redis, get_redis_pool
 
 logger = structlog.get_logger(__name__)
@@ -67,6 +68,10 @@ def create_application() -> FastAPI:
     from core.middleware.request_id import RequestIDMiddleware
     app.add_middleware(RequestIDMiddleware)
 
+    # Rate limiting middleware (sliding-window, Redis-backed)
+    from core.middleware.rate_limit import RateLimitMiddleware
+    app.add_middleware(RateLimitMiddleware)
+
     # Tenant context middleware
     from core.middleware.tenant import TenantMiddleware
     app.add_middleware(TenantMiddleware)
@@ -82,6 +87,8 @@ def create_application() -> FastAPI:
     from modules.analytics.router import router as analytics_router
     from modules.admin.router import router as admin_router
     from modules.ingestion.router import router as ingestion_router
+    from modules.apikey.router import router as apikey_router
+    from modules.webhook.router import router as webhook_router
 
     api_prefix = settings.API_PREFIX
 
@@ -95,6 +102,8 @@ def create_application() -> FastAPI:
     app.include_router(audit_router, prefix=f"{api_prefix}/audit", tags=["Audit"])
     app.include_router(analytics_router, prefix=f"{api_prefix}/analytics", tags=["Analytics"])
     app.include_router(admin_router, prefix=f"{api_prefix}/admin", tags=["Admin"])
+    app.include_router(apikey_router, prefix=f"{api_prefix}/api-keys", tags=["API Keys"])
+    app.include_router(webhook_router, prefix=f"{api_prefix}/webhooks", tags=["Webhooks"])
 
     # ── Exception Handlers ──
 

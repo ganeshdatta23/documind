@@ -1,6 +1,9 @@
 """
 DocuMind Redis Client — Connection pool, cache utilities, rate limiting helpers.
 """
+from __future__ import annotations
+
+import secrets
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -86,7 +89,30 @@ class RedisCache:
 class SlidingWindowRateLimiter:
     """
     Redis-based sliding window rate limiter.
-    Uses sorted sets with timestamp as score for accurate windowing.
+
+    Uses a sorted set with timestamp as score. The check-and-increment runs as a
+    single atomic Lua script so concurrent requests can't both slip past the
+    limit in the gap between counting and adding.
+    """
+
+    # KEYS[1]=key  ARGV[1]=now  ARGV[2]=window  ARGV[3]=max  ARGV[4]=member
+    _SCRIPT = """
+    local key = KEYS[1]
+    local now = tonumber(ARGV[1])
+    local window = tonumber(ARGV[2])
+    local max_requests = tonumber(ARGV[3])
+    local member = ARGV[4]
+    redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+    local count = redis.call('ZCARD', key)
+    if count >= max_requests then
+        local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+        local reset_after = window
+        if oldest[2] then reset_after = math.ceil(window - (now - tonumber(oldest[2]))) end
+        return {0, 0, reset_after}
+    end
+    redis.call('ZADD', key, now, member)
+    redis.call('EXPIRE', key, window)
+    return {1, max_requests - count - 1, window}
     """
 
     def __init__(self, redis: aioredis.Redis):
@@ -105,26 +131,19 @@ class SlidingWindowRateLimiter:
         import time
 
         now = time.time()
-        window_start = now - window_seconds
         key = f"rate_limit:{identifier}"
+        # Unique member per call so identical timestamps don't collide in the set.
+        member = f"{now}:{secrets.token_hex(4)}"
 
-        # Remove old entries outside window
-        await self.redis.zremrangebyscore(key, 0, window_start)
+        try:
+            allowed, remaining, reset_after = await self.redis.eval(
+                self._SCRIPT, 1, key, str(now), str(window_seconds), str(max_requests), member
+            )
+        except Exception:
+            # Fail open — never let a Redis hiccup block all traffic.
+            return True, max_requests - 1, window_seconds
 
-        # Count current requests
-        current_count = await self.redis.zcard(key)
-
-        if current_count >= max_requests:
-            oldest = await self.redis.zrange(key, 0, 0, withscores=True)
-            reset_after = int(window_seconds - (now - oldest[0][1])) if oldest else window_seconds
-            return False, 0, reset_after
-
-        # Add current request
-        await self.redis.zadd(key, {f"{now}": now})
-        await self.redis.expire(key, window_seconds)
-
-        remaining = max_requests - current_count - 1
-        return True, remaining, window_seconds
+        return bool(allowed), int(remaining), int(reset_after)
 
 
 # ─── Token Blocklist ──────────────────────────────────────────────────────────

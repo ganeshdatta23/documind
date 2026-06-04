@@ -1,4 +1,6 @@
 """Embedding client — OpenAI embeddings with Redis caching."""
+from __future__ import annotations
+
 import hashlib
 import json
 from typing import Optional
@@ -15,9 +17,16 @@ class EmbeddingClient:
         self.model = settings.OPENAI_EMBEDDING_MODEL
         self.dimensions = settings.EMBEDDING_DIMENSIONS
 
+    def _cache_key(self, text: str) -> str:
+        # Namespacing by model + dimensions prevents serving a vector produced by
+        # a different model/size after a config change. Embeddings are a pure
+        # function of (text, model, dimensions), so caching is tenant-agnostic.
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        return f"embed:{self.model}:{self.dimensions}:{digest}"
+
     async def embed_query(self, text: str) -> list[float]:
         """Embed a single query with Redis caching."""
-        cache_key = f"embed:{hashlib.sha256(text.encode()).hexdigest()}"
+        cache_key = self._cache_key(text)
 
         if self.redis:
             cached = await self.redis.get(cache_key)
@@ -32,7 +41,7 @@ class EmbeddingClient:
         embedding = response.data[0].embedding
 
         if self.redis:
-            await self.redis.setex(cache_key, 3600, json.dumps(embedding))
+            await self.redis.setex(cache_key, 86400, json.dumps(embedding))
 
         return embedding
 

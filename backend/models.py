@@ -2,6 +2,8 @@
 DocuMind SQLAlchemy Models — All database entities.
 Uses SQLAlchemy 2.x declarative mapping with type annotations.
 """
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
@@ -107,7 +109,15 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
     tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="users")
-    roles: Mapped[list["Role"]] = relationship("Role", secondary="user_roles", back_populates="users")
+    # user_roles has two FKs back to users (user_id and granted_by), so the
+    # join columns must be spelled out explicitly to avoid ambiguity.
+    roles: Mapped[list["Role"]] = relationship(
+        "Role",
+        secondary="user_roles",
+        primaryjoin="User.id == user_roles.c.user_id",
+        secondaryjoin="Role.id == user_roles.c.role_id",
+        back_populates="users",
+    )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship("RefreshToken", back_populates="user")
     documents: Mapped[list["Document"]] = relationship("Document", back_populates="uploader")
 
@@ -130,7 +140,13 @@ class Role(Base, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    users: Mapped[list["User"]] = relationship("User", secondary="user_roles", back_populates="roles")
+    users: Mapped[list["User"]] = relationship(
+        "User",
+        secondary="user_roles",
+        primaryjoin="Role.id == user_roles.c.role_id",
+        secondaryjoin="User.id == user_roles.c.user_id",
+        back_populates="roles",
+    )
     permissions: Mapped[list["Permission"]] = relationship(
         "Permission", secondary="role_permissions", back_populates="roles"
     )

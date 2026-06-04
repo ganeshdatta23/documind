@@ -2,6 +2,8 @@
 DocuMind Custom Exceptions — Domain error hierarchy.
 All exceptions map to specific HTTP status codes for consistent API responses.
 """
+from __future__ import annotations
+
 from http import HTTPStatus
 from typing import Any
 

@@ -2,6 +2,8 @@
 DocuMind Configuration — Pydantic Settings v2
 All configuration is loaded from environment variables with .env.local fallback.
 """
+from __future__ import annotations
+
 from functools import lru_cache
 from typing import Literal
 
@@ -82,10 +84,25 @@ class Settings(BaseSettings):
     RERANKER_BACKEND: Literal["passthrough", "cohere", "local"] = "passthrough"
     COHERE_API_KEY: str = ""
 
+    # ─── Conversation Memory / Summarization ──────────────────────────────────
+    # When a conversation accumulates more than THRESHOLD un-summarized messages,
+    # the oldest are rolled into a running summary, keeping KEEP_RECENT verbatim.
+    CONVERSATION_SUMMARY_THRESHOLD: int = 20
+    CONVERSATION_SUMMARY_KEEP_RECENT: int = 6
+
+    # ─── Maintenance / Retention ───────────────────────────────────────────────
+    SOFT_DELETE_RETENTION_DAYS: int = 30   # hard-delete soft-deleted rows after N days
+
+    # ─── Webhooks ───────────────────────────────────────────────────────────────
+    WEBHOOK_TIMEOUT_SECONDS: int = 10
+    WEBHOOK_MAX_RETRIES: int = 5
+    WEBHOOK_DISABLE_AFTER_FAILURES: int = 20   # auto-disable an endpoint after N consecutive failures
+
     # ─── Rate Limiting ────────────────────────────────────────────────────────
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_DEFAULT_REQUESTS: int = 100
     RATE_LIMIT_DEFAULT_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_EXEMPT_PATHS: list[str] = ["/health", "/health/detailed"]
 
     # ─── File Upload ──────────────────────────────────────────────────────────
     MAX_FILE_SIZE_BYTES: int = 50 * 1024 * 1024   # 50MB

@@ -2,6 +2,8 @@
 Local Storage Client — development file storage using local filesystem.
 Implements the same interface as GCS/S3 clients for easy swapping.
 """
+from __future__ import annotations
+
 import io
 import os
 from pathlib import Path
@@ -43,15 +45,26 @@ class LocalStorageClient:
 
     async def download(self, path: str) -> bytes:
         """Download file content from local storage."""
+        from core.exceptions import StorageError
+
         full_path = self.base_path / path
-        async with aiofiles.open(full_path, "rb") as f:
-            return await f.read()
+        if not full_path.exists():
+            raise StorageError(f"Storage object not found: {path}")
+        try:
+            async with aiofiles.open(full_path, "rb") as f:
+                return await f.read()
+        except OSError as exc:
+            raise StorageError(f"Failed to read storage object: {path}") from exc
 
     async def delete(self, path: str) -> None:
-        """Delete file from local storage."""
+        """Delete file from local storage (idempotent)."""
         full_path = self.base_path / path
-        if full_path.exists():
-            full_path.unlink()
+        try:
+            if full_path.exists():
+                full_path.unlink()
+        except OSError:
+            # Best-effort delete — surfaced via logs by callers, never fatal.
+            pass
 
     async def exists(self, path: str) -> bool:
         return (self.base_path / path).exists()

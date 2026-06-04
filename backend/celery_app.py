@@ -1,6 +1,8 @@
 """
 DocuMind Celery Application — Worker task registry and configuration.
 """
+from __future__ import annotations
+
 from celery import Celery
 
 from config import settings
@@ -17,6 +19,10 @@ celery_app = Celery(
         "workers.cleanup_worker",
     ],
 )
+
+# NOTE: task_routes below key off the *registered task name* prefix, so the
+# maintenance tasks (named "workers.cleanup_worker.*") and the summary task
+# (named "workers.summary_worker.*") are routed to their dedicated queues.
 
 celery_app.conf.update(
     task_serializer=settings.CELERY_TASK_SERIALIZER,

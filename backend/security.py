@@ -1,6 +1,8 @@
 """
 DocuMind Security — JWT, password hashing, API key utilities.
 """
+from __future__ import annotations
+
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
