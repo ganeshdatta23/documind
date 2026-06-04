@@ -1,4 +1,6 @@
 """Prompt builder — constructs LLM messages from query, context chunks, and history."""
+from __future__ import annotations
+
 from typing import Optional
 
 from rag.retriever import ScoredChunk

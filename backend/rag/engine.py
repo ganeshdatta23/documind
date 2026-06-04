@@ -2,6 +2,8 @@
 RAG Engine — Main orchestrator for retrieval-augmented generation.
 Coordinates: query rewriting → hybrid retrieval → reranking → prompt → streaming LLM → citations
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 from uuid import UUID
@@ -19,6 +21,19 @@ from .query_rewriter import QueryRewriter
 from .retriever import HybridRetriever, ScoredChunk
 
 logger = structlog.get_logger(__name__)
+
+
+def _serialize_citation(c: Citation) -> dict:
+    """JSON-safe citation dict (UUIDs → str) for SSE frames and DB storage."""
+    return {
+        "index": c.index,
+        "chunk_id": str(c.chunk_id),
+        "document_id": str(c.document_id),
+        "document_title": c.document_title,
+        "document_filename": c.document_filename,
+        "page_number": c.page_number,
+        "excerpt": c.excerpt,
+    }
 
 
 @dataclass
@@ -118,9 +133,9 @@ class RAGEngine:
             summary=summary,
         )
 
-        # 5. Stream LLM response
+        # 5. Stream LLM response (with usage accounting on the final frame)
         full_response = ""
-        total_tokens = 0
+        prompt_tokens = completion_tokens = total_tokens = 0
 
         async with self.llm.chat.completions.create(
             model=settings.OPENAI_CHAT_MODEL,
@@ -128,8 +143,15 @@ class RAGEngine:
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
             stream=True,
+            stream_options={"include_usage": True},
         ) as stream:
             async for chunk_obj in stream:
+                if chunk_obj.usage:
+                    prompt_tokens = chunk_obj.usage.prompt_tokens
+                    completion_tokens = chunk_obj.usage.completion_tokens
+                    total_tokens = chunk_obj.usage.total_tokens
+                if not chunk_obj.choices:
+                    continue
                 delta = chunk_obj.choices[0].delta
                 if delta.content:
                     full_response += delta.content
@@ -151,7 +173,10 @@ class RAGEngine:
         yield {
             "type": "done",
             "answer": cleaned_answer,
-            "citations": [c.__dict__ for c in citations],
+            "citations": [_serialize_citation(c) for c in citations],
             "retrieval_latency_ms": retrieval_latency,
             "model_name": settings.OPENAI_CHAT_MODEL,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
         }

@@ -1,4 +1,6 @@
 """Hybrid Retriever — Vector search + BM25 + RRF fusion + reranking."""
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass, field
 from typing import Optional

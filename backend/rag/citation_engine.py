@@ -1,4 +1,6 @@
 """Citation engine — extract [N] references from answers and map to source chunks."""
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from typing import Optional
