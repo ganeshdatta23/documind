@@ -11,9 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 FROM base AS deps
 WORKDIR /app
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Poetry and install dependencies straight into the system environment.
+ENV POETRY_VERSION=1.8.5
+ENV POETRY_VIRTUALENVS_CREATE=false
+ENV PIP_NO_CACHE_DIR=1
+RUN pip install --upgrade pip && pip install "poetry==${POETRY_VERSION}"
+COPY backend/pyproject.toml backend/poetry.loc[k] ./
+# --no-root: this is an application, there's no package to install.
+RUN poetry install --no-root --only main
 
 FROM deps AS final
 WORKDIR /app
