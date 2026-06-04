@@ -16,10 +16,11 @@ DocuMind is a production-grade, multi-tenant platform that allows organizations 
 | 🔍 Hybrid Search (Vector + BM25 + RRF) | ✅ |
 | 💬 Conversational RAG with Streaming | ✅ |
 | 📎 Citation Generation | ✅ |
-| 🔑 API Key Management | 🚧 Phase 4 |
-| 📊 Usage Analytics | 🚧 Phase 5 |
-| 🪝 Webhooks | 🚧 Phase 5 |
-| 🛡️ Audit Logs | 🚧 Phase 4 |
+| 🧵 Conversation summarization (long-context) | ✅ |
+| 🔑 API Key Management | ✅ |
+| 📊 Usage Analytics | ✅ |
+| 🪝 Webhooks (HMAC-signed, retried) | ✅ |
+| 🛡️ Audit Logs | ✅ |
 
 ---
 
@@ -73,39 +74,66 @@ docker compose exec api alembic upgrade head
 
 ---
 
-## 🛠️ Development
+## 🛠️ Local development (no Docker, all free)
 
-### Backend
+This path uses a local PostgreSQL install plus a Conda env and Poetry — no paid
+services. (Document Q&A still calls the OpenAI API, which needs a key, but the
+app boots and the UI runs without one.)
+
+### 1. Postgres
+
+Install PostgreSQL 16 with the `pgvector` extension, then bootstrap the role,
+database, and extensions:
+
 ```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-pip install -r requirements.txt -r requirements-test.txt
-uvicorn main:app --reload
+psql -U postgres -f db/setup.sql
 ```
 
-### Frontend
+### 2. Backend (Conda + Poetry)
+
+```bash
+conda env create -f environment.yml      # python 3.12 + poppler/tesseract/libmagic
+conda activate documind
+
+cd backend
+poetry install                            # installs deps from pyproject.toml
+poetry run alembic upgrade head           # create tables (or: psql -f ../db/schema.sql)
+poetry run python -m scripts.seed         # first login: admin@documind.local / Admin123!
+poetry run uvicorn main:app --reload
+```
+
+The API is now at http://localhost:8000 and the OpenAPI spec at
+`http://localhost:8000/api/openapi.json`.
+
+### 3. Frontend
+
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev    # `predev` auto-generates typed hooks from the live OpenAPI spec
 ```
 
-### Database Migrations
+> The frontend's OpenAPI codegen (`scripts/generate-api.ts`) runs automatically
+> before `dev`/`build`. Once the backend is up it reads `/api/openapi.json` and
+> regenerates `lib/generated/*` and per-tag hooks in `hooks/generated/*`
+> (auth, documents, conversations, search, api-keys, webhooks, …). If the
+> backend is down it falls back to the cached snapshot or placeholders, so the
+> build never breaks.
+
+### Database migrations
+
 ```bash
 cd backend
-# Create new migration
-alembic revision --autogenerate -m "description"
-# Apply migrations
-alembic upgrade head
-# Rollback
-alembic downgrade -1
+poetry run alembic revision --autogenerate -m "description"
+poetry run alembic upgrade head
+poetry run alembic downgrade -1
 ```
 
-### Running Tests
+### Tests
+
 ```bash
 cd backend
-pytest tests/ -v --cov=. --cov-report=html
+poetry run pytest --cov=. --cov-report=html
 ```
 
 ---
@@ -121,7 +149,7 @@ See [docs/architecture.md](docs/architecture.md) for the complete architecture d
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Next.js 14, TypeScript, Tailwind CSS, React Query, Zustand |
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2.x, Alembic, Pydantic v2 |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2.x, Alembic, Pydantic v2, Poetry |
 | Database | PostgreSQL 16 + pgvector |
 | Cache/Queue | Redis 7 + Celery |
 | AI | OpenAI (text-embedding-3-small + gpt-4o-mini) |
