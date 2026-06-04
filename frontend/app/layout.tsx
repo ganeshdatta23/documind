@@ -3,6 +3,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
+// Single, crisp UI typeface — Stripe/Notion-grade. (Display sizes use weight +
+// tight tracking rather than a separate serif.)
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
@@ -31,7 +33,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
-      <body className="min-h-screen bg-gray-950 text-gray-100 antialiased">
+      <body className="min-h-screen antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>
