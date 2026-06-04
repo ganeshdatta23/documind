@@ -57,3 +57,6 @@ logs/
 
 # Alembic
 backend/alembic/versions/*.pyc
+
+# Local agent / tooling state
+.claude/
