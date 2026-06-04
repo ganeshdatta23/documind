@@ -1,0 +1,22 @@
+# Conda environment for DocuMind local development.
+#
+# This pins the Python toolchain and a few binary system libraries that are
+# painful to build from wheels (poppler for PDFs, tesseract for OCR). The actual
+# Python packages are managed by Poetry inside this env — conda just gives us a
+# clean, reproducible interpreter that doesn't touch the system Python.
+#
+#   conda env create -f environment.yml
+#   conda activate documind
+#   cd backend && poetry install
+#
+name: documind
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - poetry=1.8.5
+  # System libraries used by the document pipeline (free, open-source):
+  - poppler        # PDF rendering/extraction backend
+  - tesseract      # OCR engine for scanned documents
+  - libmagic       # MIME sniffing for upload validation

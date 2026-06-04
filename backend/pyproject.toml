@@ -1,0 +1,95 @@
+[tool.poetry]
+name = "documind-backend"
+version = "1.0.0"
+description = "DocuMind — multi-tenant document intelligence platform (FastAPI + RAG)"
+authors = ["DocuMind Team"]
+readme = "../README.md"
+license = "MIT"
+# This is an application, not an importable library, so there's no package to build.
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+# Web framework + server
+fastapi = "0.115.5"
+uvicorn = { version = "0.32.1", extras = ["standard"] }
+python-multipart = "0.0.19"
+
+# Data validation / settings. The `email` extra pulls in email-validator,
+# which Pydantic's EmailStr (used in auth/user schemas) needs at runtime.
+pydantic = { version = "2.10.3", extras = ["email"] }
+pydantic-settings = "2.6.1"
+
+# Database
+sqlalchemy = "2.0.36"
+alembic = "1.14.0"
+asyncpg = "0.30.0"
+psycopg2-binary = "2.9.10"
+pgvector = "0.3.6"
+
+# Cache, queue, HTTP
+redis = "5.2.1"
+celery = "5.4.0"
+flower = "2.0.1"
+httpx = "0.28.1"
+
+# Auth / security
+python-jose = { version = "3.3.0", extras = ["cryptography"] }
+passlib = { version = "1.7.4", extras = ["bcrypt"] }
+# passlib 1.7.4 is incompatible with bcrypt >= 4.1 (its backend self-test trips
+# the new 72-byte limit). Pin to the last 4.0.x that passlib drives cleanly.
+bcrypt = "4.0.1"
+
+# RAG / AI
+# langchain-openai 0.2.14 requires openai>=1.58.1, so track the 1.5x line.
+openai = ">=1.58.1,<2.0.0"
+langchain = "0.3.13"
+langchain-openai = "0.2.14"
+langchain-community = "0.3.13"
+langchain-text-splitters = "0.3.4"
+tiktoken = "0.8.0"
+
+# Document parsing
+pymupdf = "1.25.1"
+python-docx = "1.1.2"
+beautifulsoup4 = "4.12.3"
+pytesseract = "0.3.13"
+pillow = "11.0.0"
+
+# libmagic bindings differ by platform
+python-magic = { version = "0.4.27", markers = "sys_platform != 'win32'" }
+python-magic-bin = { version = "0.4.14", markers = "sys_platform == 'win32'" }
+
+# Storage backends
+aiofiles = "24.1.0"
+boto3 = "1.35.93"
+google-cloud-storage = "2.19.0"
+
+# Resilience + logging + tracing
+tenacity = "9.0.0"
+structlog = "24.4.0"
+opentelemetry-api = "1.29.0"
+opentelemetry-sdk = "1.29.0"
+opentelemetry-instrumentation-fastapi = "0.50b0"
+opentelemetry-exporter-otlp = "1.29.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.3.4"
+pytest-asyncio = "0.24.0"
+pytest-cov = "6.0.0"
+pytest-mock = "3.14.0"
+httpx = "0.28.1"
+factory-boy = "3.3.1"
+faker = "33.1.0"
+respx = "0.21.1"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["modules", "rag"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-q"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
