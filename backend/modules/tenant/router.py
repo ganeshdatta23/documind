@@ -1,4 +1,6 @@
 """Tenant router — CRUD + usage (superadmin-only for list/create, tenant admins for own tenant)."""
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 

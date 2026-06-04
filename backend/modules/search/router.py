@@ -1,4 +1,6 @@
 """Search router — hybrid search endpoint with SSE streaming results."""
+from __future__ import annotations
+
 import json
 import time
 from typing import Optional
@@ -79,9 +81,9 @@ async def search_stream(
 
 @router.get("/suggest", summary="Query autocomplete suggestions")
 async def suggest(
+    token: CurrentToken,
+    redis: RedisConn,
     q: str = Query(min_length=2, max_length=100),
-    token: CurrentToken = Depends(),
-    redis: RedisConn = Depends(),
 ):
     """Return cached search suggestions based on recent queries."""
     # Simple Redis-backed suggestions

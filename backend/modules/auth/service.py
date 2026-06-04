@@ -2,6 +2,8 @@
 Auth Service — Core authentication business logic.
 Handles login, token issuance, refresh, logout, and account locking.
 """
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from typing import Optional
 from uuid import UUID

@@ -1,4 +1,6 @@
 """Audit repository — thin session wrapper over queries.audit."""
+from __future__ import annotations  # `list()` method must not shadow list[...] hints
+
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID

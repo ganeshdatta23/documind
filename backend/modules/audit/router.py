@@ -1,4 +1,6 @@
 """Audit router — query audit logs (org_admin+ access)."""
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 from uuid import UUID

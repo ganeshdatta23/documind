@@ -1,4 +1,6 @@
 """Admin service — orchestrates platform-level operations via AdminRepository."""
+from __future__ import annotations
+
 from modules.admin.repository import AdminRepository
 
 

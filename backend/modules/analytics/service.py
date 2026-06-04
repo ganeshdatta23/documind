@@ -1,4 +1,6 @@
 """Analytics service — aggregates metrics via repository, applies business logic."""
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from uuid import UUID
 

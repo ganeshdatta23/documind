@@ -1,8 +1,10 @@
 """User router — profile management, user CRUD (org admins), password change."""
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from core.dependencies import (
     CurrentToken,
@@ -71,11 +73,20 @@ async def change_my_password(
 )
 async def create_user(
     payload: UserCreateRequest,
+    request: Request,
     token: CurrentToken,
     db: DbSession,
 ):
     svc = _svc(db)
-    return await svc.create_user(token.tenant_id, payload, created_by=token.user_id)
+    user = await svc.create_user(token.tenant_id, payload, created_by=token.user_id)
+
+    from core.audit import record_audit
+    await record_audit(
+        db, tenant_id=token.tenant_id, actor_id=token.user_id,
+        action="user.create", resource_type="user", resource_id=user.id,
+        request=request, metadata={"email": user.email, "roles": payload.roles},
+    )
+    return user
 
 
 @router.get(

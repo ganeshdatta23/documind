@@ -1,4 +1,6 @@
 """Tenant repository — thin session wrapper over queries.tenants."""
+from __future__ import annotations  # `list()` method must not shadow list[...] hints
+
 from typing import Optional
 from uuid import UUID
 
@@ -66,3 +68,16 @@ class TenantRepository:
 
     async def get_storage_used(self, tenant_id: UUID) -> int:
         return await self.db.scalar(select_tenant_storage_used(tenant_id)) or 0
+
+    async def get_api_calls_this_month(self, tenant_id: UUID) -> int:
+        """Approximate API usage by counting user-issued queries since month start."""
+        from datetime import datetime, timezone
+
+        from queries.analytics import select_message_count_since
+
+        month_start = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        return await self.db.scalar(
+            select_message_count_since(tenant_id, month_start, role="user")
+        ) or 0

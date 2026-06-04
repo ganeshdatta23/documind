@@ -1,4 +1,6 @@
 """User module schemas — request/response DTOs with Pydantic v2 validators."""
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID

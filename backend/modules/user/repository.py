@@ -1,4 +1,8 @@
 """User repository — thin session wrapper over queries.users."""
+# Lazy annotations: this class defines a `list()` method, which would otherwise
+# shadow the builtin `list` for the `list[str]` hint on set_roles() below it.
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 

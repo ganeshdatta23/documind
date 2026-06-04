@@ -1,4 +1,6 @@
 """Analytics router — thin layer; all logic in AnalyticsService."""
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, Query
 
 from core.dependencies import CurrentToken, DbSession

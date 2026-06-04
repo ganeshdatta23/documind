@@ -1,6 +1,8 @@
 """
 Document Service — Business logic for document upload, validation, and management.
 """
+from __future__ import annotations
+
 import hashlib
 import io
 from typing import Optional
@@ -13,10 +15,12 @@ from config import settings
 from core.exceptions import (
     InvalidFileContentError,
     InvalidFileTypeError,
+    StorageError,
     StorageQuotaExceededError,
 )
 from modules.document.repository import DocumentRepository
 from modules.document.schemas import DocumentResponse, DocumentUploadRequest
+from modules.tenant.service import TenantService
 
 logger = structlog.get_logger(__name__)
 
@@ -31,10 +35,17 @@ MIME_TO_TYPE = {
 
 
 class DocumentService:
-    def __init__(self, repo: DocumentRepository, storage, redis) -> None:
+    def __init__(
+        self,
+        repo: DocumentRepository,
+        storage,
+        redis,
+        tenant_service: TenantService | None = None,
+    ) -> None:
         self.repo = repo
         self.storage = storage
         self.redis = redis
+        self.tenant_service = tenant_service
 
     async def upload(
         self,
@@ -52,13 +63,16 @@ class DocumentService:
         # 2. Read file content
         content = await file.read()
         await file.seek(0)
+        size = len(content)
 
-        # 3. Check storage quota
-        current_usage = await self.repo.get_total_storage_used(tenant_id)
-        # Tenant quota check would go here (load from tenant settings)
-        # For now use global max
-        if len(content) > settings.MAX_FILE_SIZE_BYTES:
-            raise StorageQuotaExceededError(f"File exceeds maximum size of {settings.MAX_FILE_SIZE_BYTES // 1024 // 1024}MB")
+        # 3. Enforce per-file and per-tenant quotas
+        if size > settings.MAX_FILE_SIZE_BYTES:
+            raise StorageQuotaExceededError(
+                f"File exceeds maximum size of {settings.MAX_FILE_SIZE_BYTES // 1024 // 1024}MB"
+            )
+        if self.tenant_service is not None:
+            await self.tenant_service.check_document_quota(tenant_id)
+            await self.tenant_service.check_storage_quota(tenant_id, additional_bytes=size)
 
         # 4. Calculate checksum
         checksum = hashlib.sha256(content).hexdigest()
@@ -70,11 +84,15 @@ class DocumentService:
         # 6. Upload to storage
         document_id = uuid4()
         storage_path = f"{tenant_id}/documents/{document_id}/{file.filename}"
-        await self.storage.upload(
-            path=storage_path,
-            data=io.BytesIO(content),
-            content_type=file.content_type or "application/octet-stream",
-        )
+        try:
+            await self.storage.upload(
+                path=storage_path,
+                data=io.BytesIO(content),
+                content_type=file.content_type or "application/octet-stream",
+            )
+        except Exception as exc:
+            logger.error("document.storage_upload_failed", error=str(exc), file_name=file.filename)
+            raise StorageError("Failed to store the uploaded file") from exc
 
         # 7. Create document record
         doc = await self.repo.create(
@@ -86,7 +104,7 @@ class DocumentService:
             file_name=file.filename,
             file_type=file_type,
             mime_type=file.content_type or "application/octet-stream",
-            file_size_bytes=len(content),
+            file_size_bytes=size,
             storage_path=storage_path,
             storage_bucket=settings.STORAGE_BUCKET,
             checksum_sha256=checksum,
@@ -95,15 +113,31 @@ class DocumentService:
             custom_metadata=metadata.custom_metadata,
         )
 
-        # 8. Enqueue ingestion job
-        await self._enqueue_ingestion(doc.id, tenant_id)
+        # 8. Enqueue ingestion job (mark failed + reclaim storage if we cannot)
+        enqueued = await self._enqueue_ingestion(doc.id, tenant_id)
+        if not enqueued:
+            await self.repo.update_status(
+                doc.id, "failed", error_message="Could not enqueue ingestion job"
+            )
+            doc.status = "failed"
+
+        # 9. Emit event (best-effort)
+        try:
+            from integrations.events import Events, emit_event
+            await emit_event(
+                self.repo.db, tenant_id, Events.DOCUMENT_UPLOADED,
+                {"document_id": str(doc.id), "title": doc.title, "file_size_bytes": size},
+            )
+        except Exception:
+            pass
 
         logger.info(
             "document.uploaded",
             document_id=str(doc.id),
             tenant_id=str(tenant_id),
             file_name=file.filename,
-            file_size=len(content),
+            file_size=size,
+            status=doc.status,
         )
 
         return DocumentResponse.model_validate(doc)
@@ -122,8 +156,8 @@ class DocumentService:
             if ext not in ALLOWED_EXTENSIONS:
                 raise InvalidFileTypeError(f"File extension '{ext}' is not allowed")
 
-    async def _enqueue_ingestion(self, document_id: UUID, tenant_id: UUID) -> None:
-        """Push document ID to Celery ingestion queue."""
+    async def _enqueue_ingestion(self, document_id: UUID, tenant_id: UUID) -> bool:
+        """Push document ID to the Celery ingestion queue. Returns True on success."""
         try:
             from workers.ingestion_worker import process_document
             result = process_document.apply_async(
@@ -134,6 +168,7 @@ class DocumentService:
                 queue="ingestion",
             )
             logger.info("ingestion.enqueued", document_id=str(document_id), task_id=result.id)
+            return True
         except Exception as e:
             logger.error("ingestion.enqueue.failed", document_id=str(document_id), error=str(e))
-            # Don't raise — document is saved, can retry via admin
+            return False

@@ -1,4 +1,6 @@
 """Tenant module Pydantic schemas — fully validated request/response DTOs."""
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID

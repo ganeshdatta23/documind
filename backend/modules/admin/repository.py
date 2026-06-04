@@ -1,4 +1,6 @@
 """Admin repository — thin session wrapper over queries.analytics (platform-wide)."""
+from __future__ import annotations
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from queries.analytics import (

@@ -1,6 +1,8 @@
 """
 Conversation queries — typed statements for conversations and messages.
 """
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 

@@ -1,4 +1,6 @@
 """Tenant service — business logic for tenant lifecycle, quotas, and provisioning."""
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 
@@ -77,6 +79,7 @@ class TenantService:
         storage_used = await self.repo.get_storage_used(tenant_id)
         doc_count = await self.repo.get_document_count(tenant_id)
         user_count = await self.repo.get_user_count(tenant_id)
+        api_calls = await self.repo.get_api_calls_this_month(tenant_id)
 
         return TenantUsageResponse(
             tenant_id=tenant_id,
@@ -86,7 +89,7 @@ class TenantService:
             document_limit=tenant.max_documents,
             user_count=user_count,
             user_limit=tenant.max_users,
-            api_calls_this_month=0,  # TODO: aggregate from usage_metrics
+            api_calls_this_month=api_calls,
             api_call_limit=tenant.max_api_calls_month,
         )
 

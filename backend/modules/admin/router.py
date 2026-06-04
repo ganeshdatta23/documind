@@ -1,4 +1,6 @@
 """Admin router — superadmin-only endpoints, delegates to AdminService."""
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 
 from core.dependencies import DbSession, SuperAdmin

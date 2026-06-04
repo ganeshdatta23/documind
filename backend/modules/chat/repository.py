@@ -1,4 +1,6 @@
 """Chat repository — conversations and messages data access."""
+from __future__ import annotations  # `list()` method must not shadow list[...] hints
+
 from typing import Optional
 from uuid import UUID
 
@@ -44,6 +46,25 @@ class ConversationRepository:
     async def update_summary(self, conv_id: UUID, summary: str) -> None:
         await self.db.execute(
             update(Conversation).where(Conversation.id == conv_id).values(summary=summary)
+        )
+
+    async def bump_counters(
+        self,
+        conv_id: UUID,
+        *,
+        message_delta: int = 1,
+        token_delta: int = 0,
+    ) -> None:
+        """Increment message/token counters and stamp last_message_at."""
+        from datetime import UTC, datetime
+        await self.db.execute(
+            update(Conversation)
+            .where(Conversation.id == conv_id)
+            .values(
+                message_count=Conversation.message_count + message_delta,
+                token_count=Conversation.token_count + token_delta,
+                last_message_at=datetime.now(UTC),
+            )
         )
 
     async def soft_delete(self, conv_id: UUID, tenant_id: UUID) -> bool:
@@ -92,3 +113,14 @@ class MessageRepository:
         await self.db.execute(
             update(Message).where(Message.id.in_(message_ids)).values(is_summarized=True)
         )
+
+    async def count_unsummarized(self, conversation_id: UUID) -> int:
+        """Number of messages not yet folded into the running summary."""
+        return await self.db.scalar(
+            select(func.count(Message.id)).where(
+                and_(
+                    Message.conversation_id == conversation_id,
+                    Message.is_summarized.is_(False),
+                )
+            )
+        ) or 0

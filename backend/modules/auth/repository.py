@@ -1,4 +1,6 @@
 """Auth repository — thin session wrapper over queries.auth + queries.users."""
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 from uuid import UUID

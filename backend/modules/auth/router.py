@@ -1,4 +1,6 @@
 """Auth router — login, logout, refresh, me endpoints."""
+from __future__ import annotations
+
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -31,6 +33,7 @@ async def login(
     request: Request,
     payload: LoginRequest,
     response: Response,
+    db: DbSession,
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ):
     """
@@ -45,6 +48,17 @@ async def login(
         password=payload.password,
         ip_address=ip,
         user_agent=user_agent,
+    )
+
+    from core.audit import record_audit
+    await record_audit(
+        db,
+        tenant_id=token_response.user.tenant_id,
+        actor_id=token_response.user.id,
+        action="auth.login",
+        resource_type="session",
+        resource_id=token_response.user.id,
+        request=request,
     )
 
     # Set refresh token as HttpOnly cookie (prevents XSS theft)

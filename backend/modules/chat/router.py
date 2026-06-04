@@ -1,13 +1,17 @@
 """
 Chat router — conversations CRUD and streaming message endpoint.
 """
+from __future__ import annotations
+
 import json
 import time
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
+from config import settings
 from core.dependencies import CurrentToken, DbSession, Pagination
 from modules.chat.repository import ConversationRepository, MessageRepository
 from modules.chat.schemas import (
@@ -18,6 +22,7 @@ from modules.chat.schemas import (
     MessageResponse,
 )
 
+logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
@@ -107,7 +112,7 @@ async def send_message(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Save user message
+    # Save user message + bump conversation counters
     msg_repo = MessageRepository(db)
     await msg_repo.create(
         conversation_id=conv_id,
@@ -115,6 +120,7 @@ async def send_message(
         role="user",
         content=payload.content,
     )
+    await conv_repo.bump_counters(conv_id, message_delta=1)
     await db.commit()
 
     async def event_stream():
@@ -126,7 +132,8 @@ async def send_message(
         from rag.query_rewriter import QueryRewriter
         from rag.retriever import HybridRetriever
 
-        embedding_client = EmbeddingClient()
+        from redis_client import get_redis_pool
+        embedding_client = EmbeddingClient(redis=await get_redis_pool())
         retriever = HybridRetriever(db=db, embedding_client=embedding_client)
         engine = RAGEngine(
             retriever=retriever,
@@ -139,23 +146,33 @@ async def send_message(
         doc_ids = [UUID(d) for d in (conv.document_ids or [])] or None
         answer = ""
         citations = []
+        total_tokens = prompt_tokens = completion_tokens = 0
         t_start = time.time()
 
-        async for event in engine.stream_answer(
-            query=payload.content,
-            tenant_id=token.tenant_id,
-            conversation_id=conv_id,
-            document_ids=doc_ids,
-            metadata_filters=payload.metadata_filters,
-        ):
-            if event["type"] == "token":
-                answer += event["token"]
-            if event["type"] == "done":
-                citations = event.get("citations", [])
+        try:
+            async for event in engine.stream_answer(
+                query=payload.content,
+                tenant_id=token.tenant_id,
+                conversation_id=conv_id,
+                document_ids=doc_ids,
+                metadata_filters=payload.metadata_filters,
+            ):
+                if event["type"] == "token":
+                    answer += event["token"]
+                if event["type"] == "done":
+                    citations = event.get("citations", [])
+                    answer = event.get("answer", answer)
+                    prompt_tokens = event.get("prompt_tokens", 0)
+                    completion_tokens = event.get("completion_tokens", 0)
+                    total_tokens = event.get("total_tokens", 0)
 
-            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+                yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+        except Exception as exc:  # surface a clean SSE error frame, never a broken stream
+            logger.exception("chat.stream_failed", conversation_id=str(conv_id))
+            yield f"event: error\ndata: {json.dumps({'message': 'Generation failed. Please try again.'})}\n\n"
+            answer = answer or "[generation interrupted]"
 
-        # Persist assistant message
+        # Persist assistant message + counters + summarization trigger
         latency_ms = int((time.time() - t_start) * 1000)
         await msg_repo.create(
             conversation_id=conv_id,
@@ -163,10 +180,24 @@ async def send_message(
             role="assistant",
             content=answer,
             citations=citations,
+            prompt_tokens=prompt_tokens or None,
+            completion_tokens=completion_tokens or None,
+            total_tokens=total_tokens or None,
             latency_ms=latency_ms,
-            model_name="gpt-4o-mini",
+            model_name=settings.OPENAI_CHAT_MODEL,
         )
+        await conv_repo.bump_counters(conv_id, message_delta=1, token_delta=total_tokens)
         await db.commit()
+
+        # Fold older turns into a running summary once the conversation grows.
+        if await msg_repo.count_unsummarized(conv_id) > settings.CONVERSATION_SUMMARY_THRESHOLD:
+            try:
+                from workers.summary_worker import summarize_conversation
+                summarize_conversation.apply_async(
+                    kwargs={"conversation_id": str(conv_id)}, queue="summaries"
+                )
+            except Exception as exc:
+                logger.warning("chat.summary_enqueue_failed", error=str(exc))
 
     return StreamingResponse(
         event_stream(),

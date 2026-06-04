@@ -1,6 +1,8 @@
 """
 Document router — upload, list, get, update, delete, and status streaming.
 """
+from __future__ import annotations
+
 import json
 from typing import Optional
 from uuid import UUID
@@ -18,7 +20,8 @@ from modules.document.schemas import (
     DocumentUploadRequest,
 )
 from modules.document.service import DocumentService
-from modules.ingestion.service import IngestionService
+from modules.tenant.repository import TenantRepository
+from modules.tenant.service import TenantService
 
 router = APIRouter()
 
@@ -30,6 +33,7 @@ def get_document_service(db: DbSession, redis: RedisConn) -> DocumentService:
         repo=DocumentRepository(db),
         storage=storage,
         redis=redis,
+        tenant_service=TenantService(TenantRepository(db)),
     )
 
 
@@ -41,11 +45,11 @@ def get_document_service(db: DbSession, redis: RedisConn) -> DocumentService:
 )
 async def upload_document(
     request: Request,
+    token: CurrentToken,
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     tags: str = Form("[]"),  # JSON array string
-    token: CurrentToken = Depends(),
     service: DocumentService = Depends(get_document_service),
 ):
     """
@@ -65,6 +69,18 @@ async def upload_document(
         user_id=token.user_id,
         file=file,
         metadata=metadata,
+    )
+
+    from core.audit import record_audit
+    await record_audit(
+        service.repo.db,
+        tenant_id=token.tenant_id,
+        actor_id=token.user_id,
+        action="document.upload",
+        resource_type="document",
+        resource_id=doc.id,
+        request=request,
+        metadata={"file_name": doc.file_name, "size_bytes": doc.file_size_bytes},
     )
     return doc
 
@@ -129,6 +145,7 @@ async def update_document(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete document")
 async def delete_document(
     document_id: UUID,
+    request: Request,
     token: CurrentToken,
     db: DbSession,
 ):
@@ -136,6 +153,15 @@ async def delete_document(
     deleted = await repo.soft_delete(document_id, token.tenant_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    from core.audit import record_audit
+    from integrations.events import Events, emit_event
+    await record_audit(
+        db, tenant_id=token.tenant_id, actor_id=token.user_id,
+        action="document.delete", resource_type="document", resource_id=document_id,
+        request=request,
+    )
+    await emit_event(db, token.tenant_id, Events.DOCUMENT_DELETED, {"document_id": str(document_id)})
 
 
 @router.get("/{document_id}/status", summary="Stream document processing status (SSE)")

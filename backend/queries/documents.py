@@ -4,6 +4,8 @@ Document queries — typed SQLAlchemy statements for documents and chunks.
 All functions return Select/Update/Insert — never execute.
 The repository (or service) calls session.execute(query).
 """
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 

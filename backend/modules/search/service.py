@@ -1,4 +1,6 @@
 """Search service — wraps the RAG retriever with caching and result formatting."""
+from __future__ import annotations
+
 import hashlib
 import json
 import time

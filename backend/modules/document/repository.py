@@ -1,4 +1,8 @@
 """Document repository — thin session wrapper over queries.documents."""
+# Lazy annotations: this class defines a `list()` method, which would otherwise
+# shadow the builtin `list` for the `list[...]` return hints below it.
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 
