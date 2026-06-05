@@ -25,7 +25,10 @@ and well under Upstash's command limit.
   on Render's ephemeral disk and are lost on restart/redeploy. Embeddings + chunks
   are in Postgres (persistent), so chat over already-ingested docs keeps working;
   only the "download original" would 404. Fine for a demo.
-- **Gemini limits:** free tier is rate-limited (requests/min). Keep test docs small.
+- **Gemini limits:** free tier is rate-limited (requests/min) — keep test docs small.
+  Free quota is also **model-specific**: this stack uses `gemini-2.5-flash` (chat)
+  and `gemini-embedding-001` (embeddings), which have free quota; some models
+  (e.g. `gemini-2.0-flash`) may report a 0 free-tier limit on a given key/region.
 - **Neon/Supabase** auto-suspend when idle and resume on the next query.
 
 ---
@@ -140,7 +143,8 @@ and well under Upstash's command limit.
   On Supabase use the **Session pooler** (IPv4) host.
 - **Embeddings error / dimension mismatch:** the DB column is sized at first
   migration from `EMBEDDING_DIMENSIONS`. It must equal your embedding model's size
-  (768 for `text-embedding-004`). If you change models later, drop & recreate the
+  (768 for `gemini-embedding-001` with `EMBEDDING_SEND_DIMENSIONS=true`). If you
+  change models later, drop & recreate the
   `chunk_embeddings.embedding` column at the new size.
 - **Gemini "batch"/input errors on embeddings:** keep `EMBEDDING_BATCH_SIZE=1`
   (set in render.yaml). Raise it only if your provider accepts array input.

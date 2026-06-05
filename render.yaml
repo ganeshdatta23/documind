@@ -45,13 +45,15 @@ services:
       - key: OPENAI_BASE_URL
         value: https://generativelanguage.googleapis.com/v1beta/openai/
       - key: OPENAI_CHAT_MODEL
-        value: gemini-2.0-flash
+        value: gemini-2.5-flash
       - key: OPENAI_EMBEDDING_MODEL
-        value: text-embedding-004
+        value: gemini-embedding-001
       - key: EMBEDDING_DIMENSIONS
         value: "768"
+      # gemini-embedding-001 is natively 3072-d (above pgvector's 2000-d index
+      # limit); it honours `dimensions` to return an indexable 768-d vector.
       - key: EMBEDDING_SEND_DIMENSIONS
-        value: "false"
+        value: "true"
       - key: EMBEDDING_BATCH_SIZE
         value: "1"
 

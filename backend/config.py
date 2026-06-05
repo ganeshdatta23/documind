@@ -80,9 +80,9 @@ class Settings(BaseSettings):
     # Point OPENAI_BASE_URL at the provider and set the model names accordingly.
     # For a free deploy with Gemini, see .env.example / DEPLOYMENT.md:
     #   OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-    #   OPENAI_CHAT_MODEL=gemini-2.0-flash
-    #   OPENAI_EMBEDDING_MODEL=text-embedding-004
-    #   EMBEDDING_DIMENSIONS=768   EMBEDDING_SEND_DIMENSIONS=false
+    #   OPENAI_CHAT_MODEL=gemini-2.5-flash
+    #   OPENAI_EMBEDDING_MODEL=gemini-embedding-001
+    #   EMBEDDING_DIMENSIONS=768   EMBEDDING_SEND_DIMENSIONS=true
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
