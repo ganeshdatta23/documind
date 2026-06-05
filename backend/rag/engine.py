@@ -139,7 +139,9 @@ class RAGEngine:
         full_response = ""
         prompt_tokens = completion_tokens = total_tokens = 0
 
-        async with self.llm.chat.completions.create(  # type: ignore[call-overload]
+        # AsyncOpenAI's streaming create() is a coroutine returning an AsyncStream;
+        # it must be awaited before entering the async context manager.
+        async with await self.llm.chat.completions.create(  # type: ignore[call-overload]
             model=settings.OPENAI_CHAT_MODEL,
             messages=prompt_messages,
             temperature=settings.LLM_TEMPERATURE,
