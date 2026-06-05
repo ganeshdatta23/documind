@@ -42,13 +42,19 @@ async def lifespan(app: FastAPI):
 
 def create_application() -> FastAPI:
     """Application factory pattern."""
+    # Docs on outside production by default; ENABLE_DOCS overrides either way.
+    docs_enabled = (
+        settings.ENABLE_DOCS
+        if settings.ENABLE_DOCS is not None
+        else not settings.is_production
+    )
     app = FastAPI(
         title="DocuMind API",
         description="Multi-tenant enterprise document intelligence platform powered by RAG",
         version=settings.APP_VERSION,
-        docs_url="/api/docs" if not settings.is_production else None,
-        redoc_url="/api/redoc" if not settings.is_production else None,
-        openapi_url="/api/openapi.json" if not settings.is_production else None,
+        docs_url="/api/docs" if docs_enabled else None,
+        redoc_url="/api/redoc" if docs_enabled else None,
+        openapi_url="/api/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
 

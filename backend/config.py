@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production-min-32-chars!!"
     ALLOWED_HOSTS: list[str] = ["*"]
     API_PREFIX: str = "/api/v1"
+    # Expose Swagger (/api/docs), ReDoc (/api/redoc), and openapi.json. Default
+    # (None) = on everywhere except production. Set ENABLE_DOCS=true to expose
+    # them in production too.
+    ENABLE_DOCS: bool | None = None
 
     # ─── Database ─────────────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql+asyncpg://documind:documind_dev@localhost:5432/documind"
