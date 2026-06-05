@@ -1,3 +1,4 @@
+
 """
 DocuMind Configuration — Pydantic Settings v2
 All configuration is loaded from environment variables with .env.local fallback.
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
     DB_ECHO: bool = False
+    # Require TLS to the database. Managed Postgres (Neon, Supabase, RDS, …) needs
+    # this; local Docker Postgres does not. Maps to asyncpg ssl="require".
+    DB_SSL: bool = False
 
     # ─── Redis ────────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -45,12 +49,20 @@ class Settings(BaseSettings):
     CELERY_TASK_SERIALIZER: str = "json"
     CELERY_RESULT_SERIALIZER: str = "json"
     CELERY_MAX_RETRIES: int = 3
+    # Run tasks inline in the calling process instead of dispatching to a worker.
+    # Useful for single-process / free-tier deploys with no dedicated worker.
+    CELERY_TASK_ALWAYS_EAGER: bool = False
 
     # ─── JWT Authentication ───────────────────────────────────────────────────
     JWT_SECRET_KEY: str = "change-me-jwt-secret-min-32-chars-!!!"
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Refresh-token cookie attributes. When the frontend and API live on different
+    # sites (e.g. Vercel + Render), the browser only sends the cookie if it is
+    # SameSite=None; Secure — set COOKIE_SAMESITE=none and COOKIE_SECURE=true there.
+    COOKIE_SAMESITE: Literal["strict", "lax", "none"] = "strict"
+    COOKIE_SECURE: bool = True
 
     # ─── Storage ──────────────────────────────────────────────────────────────
     STORAGE_BACKEND: Literal["local", "gcs", "s3"] = "local"
@@ -62,12 +74,24 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
 
-    # ─── AI / OpenAI ─────────────────────────────────────────────────────────
+    # ─── AI provider (OpenAI-compatible) ───────────────────────────────────────
+    # The whole AI layer talks through the OpenAI SDK, so it works with ANY
+    # OpenAI-compatible endpoint — OpenAI, Google Gemini, Groq, OpenRouter, etc.
+    # Point OPENAI_BASE_URL at the provider and set the model names accordingly.
+    # For a free deploy with Gemini, see .env.example / DEPLOYMENT.md:
+    #   OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+    #   OPENAI_CHAT_MODEL=gemini-2.0-flash
+    #   OPENAI_EMBEDDING_MODEL=text-embedding-004
+    #   EMBEDDING_DIMENSIONS=768   EMBEDDING_SEND_DIMENSIONS=false
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     EMBEDDING_DIMENSIONS: int = 1536
+    # Whether to send the `dimensions` param to the embeddings API. OpenAI honours
+    # it (Matryoshka truncation); most other providers (e.g. Gemini) reject it and
+    # return their model's native size — set this False for those.
+    EMBEDDING_SEND_DIMENSIONS: bool = True
     EMBEDDING_BATCH_SIZE: int = 100
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 2048

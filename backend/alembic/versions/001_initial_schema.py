@@ -10,6 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from config import settings
+
 revision: str = "001_initial_schema"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
@@ -284,8 +286,13 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True),
                   server_default=sa.text("NOW()"), nullable=False),
     )
-    # Add pgvector column after table creation (special type)
-    op.execute("ALTER TABLE chunk_embeddings ADD COLUMN embedding vector(1536)")
+    # Add pgvector column after table creation (special type). The dimension is
+    # driven by settings.EMBEDDING_DIMENSIONS so it always matches the embedding
+    # model in use (1536 for OpenAI text-embedding-3-small, 768 for Gemini
+    # text-embedding-004, etc.). Set EMBEDDING_DIMENSIONS before `alembic upgrade`.
+    op.execute(
+        f"ALTER TABLE chunk_embeddings ADD COLUMN embedding vector({settings.EMBEDDING_DIMENSIONS})"
+    )
     op.execute("ALTER TABLE chunk_embeddings ALTER COLUMN embedding SET NOT NULL")
 
     op.create_index("idx_embeddings_tenant_id", "chunk_embeddings", ["tenant_id"])

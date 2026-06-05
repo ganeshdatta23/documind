@@ -81,7 +81,9 @@ async def _summarize_async(task, conversation_id: str) -> dict:
         )
 
         try:
-            llm = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            llm = AsyncOpenAI(
+                api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL
+            )
             response = await llm.chat.completions.create(
                 model=settings.OPENAI_CHAT_MODEL,
                 messages=[{

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from core.dependencies import CurrentToken, DbSession, RedisConn, get_token_data
 from modules.auth.repository import AuthRepository
 from modules.auth.schemas import (
@@ -67,8 +68,8 @@ async def login(
         value=raw_refresh,
         max_age=COOKIE_MAX_AGE,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
         path="/api/v1/auth",
     )
 
@@ -100,8 +101,8 @@ async def refresh_token(
         value=new_raw_refresh,
         max_age=COOKIE_MAX_AGE,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
         path="/api/v1/auth",
     )
 

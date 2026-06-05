@@ -31,6 +31,10 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 
+    # Inline execution (no separate worker) for single-process / free-tier deploys.
+    task_always_eager=settings.CELERY_TASK_ALWAYS_EAGER,
+    task_eager_propagates=settings.CELERY_TASK_ALWAYS_EAGER,
+
     # Retry settings
     task_max_retries=settings.CELERY_MAX_RETRIES,
     task_default_retry_delay=60,  # 1 minute base delay

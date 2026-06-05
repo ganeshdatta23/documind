@@ -142,19 +142,20 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
 
 
 async def _embed_batch(texts: list[str]) -> list[list[float]]:
-    """Call OpenAI embeddings API in configurable batch sizes."""
+    """Embed texts via the configured OpenAI-compatible provider, in batches."""
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    client = AsyncOpenAI(
+        api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL
+    )
     all_embeddings: list[list[float]] = []
 
     for i in range(0, len(texts), settings.EMBEDDING_BATCH_SIZE):
         batch = texts[i : i + settings.EMBEDDING_BATCH_SIZE]
-        response = await client.embeddings.create(
-            model=settings.OPENAI_EMBEDDING_MODEL,
-            input=batch,
-            dimensions=settings.EMBEDDING_DIMENSIONS,
-        )
+        kwargs: dict = {"model": settings.OPENAI_EMBEDDING_MODEL, "input": batch}
+        if settings.EMBEDDING_SEND_DIMENSIONS:
+            kwargs["dimensions"] = settings.EMBEDDING_DIMENSIONS
+        response = await client.embeddings.create(**kwargs)
         all_embeddings.extend(item.embedding for item in response.data)
 
     return all_embeddings

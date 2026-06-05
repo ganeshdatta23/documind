@@ -24,7 +24,9 @@ Standalone Question:"""
 
 class QueryRewriter:
     def __init__(self) -> None:
-        self.llm = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.llm = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL
+        )
 
     async def rewrite(self, query: str, messages: list) -> str:
         """Rewrite query using conversation history. Returns standalone question."""

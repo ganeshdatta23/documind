@@ -43,9 +43,15 @@ def create_engine(database_url: str | None = None, **kwargs: Any) -> AsyncEngine
             "pool_pre_ping": True,
         })
 
+    # Managed Postgres providers require TLS; asyncpg takes ssl via connect_args.
+    connect_args = kwargs.pop("connect_args", {})
+    if settings.DB_SSL:
+        connect_args.setdefault("ssl", "require")
+
     return create_async_engine(
         url,
         echo=settings.DB_ECHO,
+        connect_args=connect_args,
         **pool_kwargs,
         **kwargs,
     )

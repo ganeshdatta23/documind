@@ -12,10 +12,20 @@ from config import settings
 
 class EmbeddingClient:
     def __init__(self, redis=None) -> None:
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL
+        )
         self.redis = redis
         self.model = settings.OPENAI_EMBEDDING_MODEL
         self.dimensions = settings.EMBEDDING_DIMENSIONS
+
+    def _embed_kwargs(self, payload) -> dict:
+        """Build embeddings.create kwargs, sending `dimensions` only when the
+        provider supports it (OpenAI does; Gemini and most others don't)."""
+        kwargs: dict = {"model": self.model, "input": payload}
+        if settings.EMBEDDING_SEND_DIMENSIONS:
+            kwargs["dimensions"] = self.dimensions
+        return kwargs
 
     def _cache_key(self, text: str) -> str:
         # Namespacing by model + dimensions prevents serving a vector produced by
@@ -33,11 +43,7 @@ class EmbeddingClient:
             if cached:
                 return json.loads(cached)
 
-        response = await self.client.embeddings.create(
-            model=self.model,
-            input=text,
-            dimensions=self.dimensions,
-        )
+        response = await self.client.embeddings.create(**self._embed_kwargs(text))
         embedding = response.data[0].embedding
 
         if self.redis:
@@ -52,11 +58,7 @@ class EmbeddingClient:
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            response = await self.client.embeddings.create(
-                model=self.model,
-                input=batch,
-                dimensions=self.dimensions,
-            )
+            response = await self.client.embeddings.create(**self._embed_kwargs(batch))
             all_embeddings.extend([e.embedding for e in response.data])
 
         return all_embeddings

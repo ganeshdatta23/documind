@@ -65,7 +65,9 @@ class RAGEngine:
         self.prompt_builder = prompt_builder
         self.citation_engine = citation_engine
         self.memory_manager = memory_manager
-        self.llm = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.llm = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL
+        )
 
     async def stream_answer(
         self,
