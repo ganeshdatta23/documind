@@ -34,7 +34,6 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
     from database import async_session_factory
     from models import ChunkEmbedding
     from modules.document.repository import DocumentRepository
-    from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     doc_id = UUID(document_id)
@@ -85,13 +84,12 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
                         set_={"model_name": settings.OPENAI_EMBEDDING_MODEL},
                     )
                 )
-                result = await db.execute(stmt)
-                embedding_id = result.inserted_primary_key[0]
+                await db.execute(stmt)
 
                 # pgvector column must be set via raw SQL cast since SQLAlchemy
                 # doesn't natively know the vector type — this is the ORM-sanctioned
                 # approach for pgvector until sqlalchemy-pgvector is stabilised.
-                from sqlalchemy import text, update
+                from sqlalchemy import text
                 await db.execute(
                     text(
                         "UPDATE chunk_embeddings "
