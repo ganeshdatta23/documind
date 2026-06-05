@@ -32,9 +32,8 @@ def generate_embeddings(self: Task, document_id: str, tenant_id: str) -> dict:
 
 async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> dict:
     from database import async_session_factory
-    from models import ChunkEmbedding
     from modules.document.repository import DocumentRepository
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy import text
 
     doc_id = UUID(document_id)
     t_id = UUID(tenant_id)
@@ -68,36 +67,27 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
                     f"Embedding count mismatch: got {len(embeddings)} for {len(chunks)} chunks"
                 )
 
-            # Upsert ChunkEmbedding rows via ORM insert-on-conflict
-            # pgvector stores the list[float] as a vector — cast required
+            # Upsert each chunk's embedding in a SINGLE statement. The embedding
+            # column is NOT NULL, so the value must be supplied on INSERT — the
+            # previous insert-then-update split inserted NULL first and tripped the
+            # constraint. pgvector needs the list cast from its text form.
+            upsert = text(
+                "INSERT INTO chunk_embeddings "
+                "(id, chunk_id, tenant_id, document_id, model_name, embedding) "
+                "VALUES (gen_random_uuid(), :chunk_id, :tenant_id, :document_id, "
+                ":model, CAST(:vec AS vector)) "
+                "ON CONFLICT (chunk_id) DO UPDATE SET "
+                "embedding = EXCLUDED.embedding, "
+                "model_name = EXCLUDED.model_name, updated_at = NOW()"
+            )
             for chunk, vector in zip(chunks, embeddings):
-                stmt = (
-                    pg_insert(ChunkEmbedding)
-                    .values(
-                        chunk_id=chunk.id,
-                        tenant_id=t_id,
-                        document_id=doc_id,
-                        model_name=settings.OPENAI_EMBEDDING_MODEL,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=["chunk_id"],
-                        set_={"model_name": settings.OPENAI_EMBEDDING_MODEL},
-                    )
-                )
-                await db.execute(stmt)
-
-                # pgvector column must be set via raw SQL cast since SQLAlchemy
-                # doesn't natively know the vector type — this is the ORM-sanctioned
-                # approach for pgvector until sqlalchemy-pgvector is stabilised.
-                from sqlalchemy import text
-                await db.execute(
-                    text(
-                        "UPDATE chunk_embeddings "
-                        "SET embedding = CAST(:vec AS vector) "
-                        "WHERE chunk_id = :cid"
-                    ),
-                    {"vec": str(vector), "cid": str(chunk.id)},
-                )
+                await db.execute(upsert, {
+                    "chunk_id": str(chunk.id),
+                    "tenant_id": str(t_id),
+                    "document_id": str(doc_id),
+                    "model": settings.OPENAI_EMBEDDING_MODEL,
+                    "vec": str(vector),
+                })
 
             await repo.update_status(doc_id, "ready")
             await db.commit()

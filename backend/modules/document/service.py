@@ -118,6 +118,11 @@ class DocumentService:
             custom_metadata=metadata.custom_metadata,
         )
 
+        # Persist the document now so the in-process ingestion task (which opens
+        # its own DB session) can see it — otherwise it races the request's commit
+        # and reports "document_not_found".
+        await self.repo.db.commit()
+
         # 8. Enqueue ingestion job (mark failed + reclaim storage if we cannot)
         enqueued = await self._enqueue_ingestion(doc.id, tenant_id)
         if not enqueued:

@@ -143,7 +143,9 @@ async def send_message(
             memory_manager=ConversationMemoryManager(db),
         )
 
-        doc_ids = [UUID(d) for d in (conv.document_ids or [])] or None
+        # conv.document_ids come back from asyncpg as UUID objects already;
+        # str() first so UUID() accepts both asyncpg UUIDs and plain strings.
+        doc_ids = [UUID(str(d)) for d in (conv.document_ids or [])] or None
         answer = ""
         citations = []
         total_tokens = prompt_tokens = completion_tokens = 0
