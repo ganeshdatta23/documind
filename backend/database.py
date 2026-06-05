@@ -31,7 +31,7 @@ def create_engine(database_url: str | None = None, **kwargs: Any) -> AsyncEngine
     Uses NullPool for testing to avoid connection issues.
     """
     url = database_url or settings.DATABASE_URL
-    pool_kwargs = {}
+    pool_kwargs: dict[str, Any] = {}
 
     if settings.APP_ENV == "testing":
         pool_kwargs["poolclass"] = NullPool

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import BinaryIO
 
-import aiofiles
+import aiofiles  # type: ignore[import-untyped]
 
 from config import settings
 

@@ -4,8 +4,8 @@ DocuMind Redis Client — Connection pool, cache utilities, rate limiting helper
 from __future__ import annotations
 
 import secrets
-from collections.abc import AsyncGenerator
-from typing import Any
+from collections.abc import AsyncGenerator, Awaitable
+from typing import Any, cast
 
 import redis.asyncio as aioredis
 
@@ -136,8 +136,13 @@ class SlidingWindowRateLimiter:
         member = f"{now}:{secrets.token_hex(4)}"
 
         try:
-            allowed, remaining, reset_after = await self.redis.eval(
-                self._SCRIPT, 1, key, str(now), str(window_seconds), str(max_requests), member
+            # redis-py types eval() as sync|async; cast to the awaitable we know
+            # we get from the async client so the result unpacks cleanly.
+            allowed, remaining, reset_after = await cast(
+                "Awaitable[Any]",
+                self.redis.eval(
+                    self._SCRIPT, 1, key, str(now), str(window_seconds), str(max_requests), member
+                ),
             )
         except Exception:
             # Fail open — never let a Redis hiccup block all traffic.

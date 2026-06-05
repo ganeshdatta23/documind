@@ -1,9 +1,9 @@
 """Document repository — thin session wrapper over queries.documents."""
-# Lazy annotations: this class defines a `list()` method, which would otherwise
-# shadow the builtin `list` for the `list[...]` return hints below it.
+# This class defines a `list()` method which shadows the builtin `list` inside
+# its own type hints, so the annotations below use typing.List instead.
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -43,11 +43,11 @@ class DocumentRepository:
         tenant_id: UUID,
         *,
         status: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        tags: Optional[List[str]] = None,
         uploaded_by: Optional[UUID] = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> tuple[list[Document], int]:
+    ) -> tuple[List[Document], int]:
         base = select_documents(tenant_id, status=status, tags=tags, uploaded_by=uploaded_by)
         total = await count_from(self.db, base.subquery())
         result = await self.db.execute(base.limit(limit).offset(offset))
@@ -72,13 +72,13 @@ class DocumentRepository:
         await self.db.execute(update_document_fields(document_id, tenant_id, **kwargs))
         return await self.get_by_id(document_id, tenant_id)
 
-    async def create_chunks(self, chunks: list[dict]) -> list[DocumentChunk]:
+    async def create_chunks(self, chunks: List[dict]) -> List[DocumentChunk]:
         chunk_objects = [DocumentChunk(**c) for c in chunks]
         self.db.add_all(chunk_objects)
         await self.db.flush()
         return chunk_objects
 
-    async def get_chunks(self, document_id: UUID, tenant_id: UUID) -> list[DocumentChunk]:
+    async def get_chunks(self, document_id: UUID, tenant_id: UUID) -> List[DocumentChunk]:
         result = await self.db.execute(select_document_chunks(document_id, tenant_id))
         return list(result.scalars().all())
 

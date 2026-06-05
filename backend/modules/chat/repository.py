@@ -1,7 +1,7 @@
 """Chat repository — conversations and messages data access."""
 from __future__ import annotations  # `list()` method must not shadow list[...] hints
 
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import and_, func, select, update
@@ -95,7 +95,7 @@ class MessageRepository:
         conversation_id: UUID,
         limit: int = 50,
         before_id: Optional[UUID] = None,
-    ) -> list[Message]:
+    ) -> List[Message]:
         q = select(Message).where(Message.conversation_id == conversation_id)
         if before_id:
             # Cursor-based pagination
@@ -109,7 +109,7 @@ class MessageRepository:
         )
         return list(result.scalars().all())
 
-    async def mark_summarized(self, message_ids: list[UUID]) -> None:
+    async def mark_summarized(self, message_ids: List[UUID]) -> None:
         await self.db.execute(
             update(Message).where(Message.id.in_(message_ids)).values(is_summarized=True)
         )

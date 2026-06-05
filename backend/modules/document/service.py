@@ -78,7 +78,7 @@ class DocumentService:
         checksum = hashlib.sha256(content).hexdigest()
 
         # 5. Determine file type
-        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "txt"
+        ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "txt"
         file_type = MIME_TO_TYPE.get(file.content_type or "", ext)
 
         # 6. Upload to storage

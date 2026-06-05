@@ -1,9 +1,9 @@
 """User repository — thin session wrapper over queries.users."""
-# Lazy annotations: this class defines a `list()` method, which would otherwise
-# shadow the builtin `list` for the `list[str]` hint on set_roles() below it.
+# This class defines a `list()` method which shadows the builtin `list` inside
+# its own type hints, so the annotations below use typing.List instead.
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +41,7 @@ class UserRepository:
         is_active: Optional[bool] = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> tuple[list[User], int]:
+    ) -> tuple[List[User], int]:
         base = select_users(tenant_id, is_active=is_active)
         total = await count_from(self.db, base.subquery())
         result = await self.db.execute(base.limit(limit).offset(offset))
@@ -62,7 +62,7 @@ class UserRepository:
         result = await self.db.execute(soft_delete_user(user_id, tenant_id))
         return result.rowcount > 0
 
-    async def set_roles(self, user_id: UUID, tenant_id: UUID, role_names: list[str]) -> None:
+    async def set_roles(self, user_id: UUID, tenant_id: UUID, role_names: List[str]) -> None:
         """Replace all role associations for a user."""
         roles_result = await self.db.execute(select_roles_by_names(role_names))
         roles = roles_result.scalars().all()
