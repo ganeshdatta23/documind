@@ -1,0 +1,76 @@
+# Render Blueprint — free-tier DocuMind API.
+# Deploy: push to GitHub, then on render.com → New → Blueprint → pick this repo.
+# Postgres (Supabase/Neon) and Redis (Upstash) are external free services; set
+# their connection strings as the secret env vars below (sync:false) in the
+# Render dashboard. See DEPLOYMENT.md for the full walkthrough.
+services:
+  - type: web
+    name: documind-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./docker/backend/Dockerfile
+    dockerContext: .
+    dockerCommand: bash start.sh
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # ── App ──────────────────────────────────────────────────────────────
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: LOG_FORMAT
+        value: json
+
+      # ── Managed Postgres needs TLS ─────────────────────────────────────────
+      - key: DB_SSL
+        value: "true"
+
+      # ── Free-tier execution: run ingestion inline (no separate worker) ─────
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "true"
+
+      # ── Cross-site auth cookie (frontend on Vercel, API on Render) ─────────
+      - key: CORS_ALLOW_CREDENTIALS
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: COOKIE_SECURE
+        value: "true"
+
+      # ── AI provider: Google Gemini via its OpenAI-compatible endpoint ──────
+      - key: OPENAI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai/
+      - key: OPENAI_CHAT_MODEL
+        value: gemini-2.0-flash
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-004
+      - key: EMBEDDING_DIMENSIONS
+        value: "768"
+      - key: EMBEDDING_SEND_DIMENSIONS
+        value: "false"
+      - key: EMBEDDING_BATCH_SIZE
+        value: "1"
+
+      # ── Auto-generated secrets ─────────────────────────────────────────────
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+
+      # ── Secrets to paste in the Render dashboard (kept out of git) ─────────
+      - key: OPENAI_API_KEY          # your Google AI Studio (Gemini) API key
+        sync: false
+      - key: DATABASE_URL            # Supabase/Neon: postgresql+asyncpg://…
+        sync: false
+      - key: REDIS_URL               # Upstash: rediss://…
+        sync: false
+      - key: CELERY_BROKER_URL       # same Upstash URL as REDIS_URL
+        sync: false
+      - key: CELERY_RESULT_BACKEND   # same Upstash URL as REDIS_URL
+        sync: false
+      - key: CORS_ORIGINS            # JSON list, e.g. ["https://your-app.vercel.app"]
+        sync: false

@@ -18,7 +18,10 @@ ENV PIP_NO_CACHE_DIR=1
 RUN pip install --upgrade pip && pip install "poetry==${POETRY_VERSION}"
 COPY backend/pyproject.toml backend/poetry.loc[k] ./
 # --no-root: this is an application, there's no package to install.
-RUN poetry install --no-root --only main
+# Install against the committed lock when present; otherwise resolve + lock at
+# build time (the repo doesn't commit poetry.lock).
+RUN poetry install --no-root --only main --no-interaction \
+    || (poetry lock --no-interaction && poetry install --no-root --only main --no-interaction)
 
 FROM deps AS final
 WORKDIR /app
