@@ -3,6 +3,7 @@ Document Service — Business logic for document upload, validation, and managem
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 from typing import Optional
@@ -23,6 +24,10 @@ from modules.document.schemas import DocumentResponse, DocumentUploadRequest
 from modules.tenant.service import TenantService
 
 logger = structlog.get_logger(__name__)
+
+# Strong refs to in-process ingestion tasks so they aren't garbage-collected
+# mid-run (asyncio only holds weak references to background tasks).
+_BACKGROUND_TASKS: set = set()
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".html", ".md"}
 MIME_TO_TYPE = {
@@ -157,14 +162,27 @@ class DocumentService:
                 raise InvalidFileTypeError(f"File extension '{ext}' is not allowed")
 
     async def _enqueue_ingestion(self, document_id: UUID, tenant_id: UUID) -> bool:
-        """Push document ID to the Celery ingestion queue. Returns True on success."""
+        """Kick off ingestion. Returns True on success.
+
+        On single-instance / free-tier deploys (CELERY_TASK_ALWAYS_EAGER) there's
+        no worker or broker, so run the pipeline in-process as a background asyncio
+        task (the request returns immediately and the client polls status).
+        Otherwise enqueue it on the Celery `ingestion` queue for a worker.
+        """
         try:
+            if settings.CELERY_TASK_ALWAYS_EAGER:
+                from workers.ingestion_worker import run_ingestion_inline
+                t = asyncio.create_task(
+                    run_ingestion_inline(str(document_id), str(tenant_id))
+                )
+                _BACKGROUND_TASKS.add(t)
+                t.add_done_callback(_BACKGROUND_TASKS.discard)
+                logger.info("ingestion.inline_scheduled", document_id=str(document_id))
+                return True
+
             from workers.ingestion_worker import process_document
             result = process_document.apply_async(
-                kwargs={
-                    "document_id": str(document_id),
-                    "tenant_id": str(tenant_id),
-                },
+                kwargs={"document_id": str(document_id), "tenant_id": str(tenant_id)},
                 queue="ingestion",
             )
             logger.info("ingestion.enqueued", document_id=str(document_id), task_id=result.id)

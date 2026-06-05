@@ -129,7 +129,7 @@ async def _generate_embeddings_async(task, document_id: str, tenant_id: str) -> 
             )
             await db.commit()
 
-            if task.request.retries < task.max_retries:
+            if task is not None and task.request.retries < task.max_retries:
                 raise task.retry(exc=exc, countdown=30 * (2 ** task.request.retries))
 
             from integrations.events import Events, emit_event

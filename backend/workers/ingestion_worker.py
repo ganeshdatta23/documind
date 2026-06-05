@@ -51,7 +51,25 @@ def process_document(self: Task, document_id: str, tenant_id: str) -> dict:
     return self.run_async(_process_document_async(self, document_id, tenant_id))
 
 
-async def _process_document_async(task: Task, document_id: str, tenant_id: str) -> dict:
+async def run_ingestion_inline(document_id: str, tenant_id: str) -> None:
+    """Run the full ingestion + embedding pipeline in-process (no Celery).
+
+    Used on single-instance / free-tier deploys (CELERY_TASK_ALWAYS_EAGER) where
+    there is no worker or broker. The upload endpoint schedules this as a
+    background asyncio task, so the request returns immediately and the client
+    polls document status. `task=None` selects the no-Celery code paths below.
+    """
+    try:
+        await _process_document_async(None, document_id, tenant_id)
+    except Exception:
+        logger.error(
+            "ingestion.inline_failed",
+            document_id=document_id,
+            traceback=traceback.format_exc(),
+        )
+
+
+async def _process_document_async(task, document_id: str, tenant_id: str) -> dict:
     """Async implementation of the ingestion pipeline."""
     from datetime import UTC, datetime
 
@@ -79,8 +97,8 @@ async def _process_document_async(task: Task, document_id: str, tenant_id: str) 
             tenant_id=t_id,
             job_type="full",
             status="running",
-            celery_task_id=getattr(task.request, "id", None),
-            attempt_count=task.request.retries + 1,
+            celery_task_id=getattr(task.request, "id", None) if task is not None else None,
+            attempt_count=(task.request.retries + 1) if task is not None else 1,
             started_at=datetime.now(UTC),
         )
         db.add(job)
@@ -130,12 +148,17 @@ async def _process_document_async(task: Task, document_id: str, tenant_id: str) 
             await repo.update_status(doc_id, "embedding")
             await db.commit()
 
-            # Enqueue embedding task
-            from workers.embedding_worker import generate_embeddings
-            generate_embeddings.apply_async(
-                kwargs={"document_id": document_id, "tenant_id": tenant_id},
-                queue="embedding",
-            )
+            # Generate embeddings. Inline (no Celery) when running in-process;
+            # otherwise hand off to the embedding worker via the queue.
+            if task is None:
+                from workers.embedding_worker import _generate_embeddings_async
+                await _generate_embeddings_async(None, document_id, tenant_id)
+            else:
+                from workers.embedding_worker import generate_embeddings
+                generate_embeddings.apply_async(
+                    kwargs={"document_id": document_id, "tenant_id": tenant_id},
+                    queue="embedding",
+                )
 
             await _finish_job("completed")
             await db.commit()
@@ -153,11 +176,10 @@ async def _process_document_async(task: Task, document_id: str, tenant_id: str) 
             await _finish_job("failed", error=str(exc)[:2000])
             await db.commit()
 
-            if task.request.retries < task.max_retries:
+            if task is not None and task.request.retries < task.max_retries:
                 raise task.retry(exc=exc, countdown=60 * (2 ** task.request.retries))
-            else:
-                # Dead letter — mark as failed permanently
-                return {"status": "dead_letter", "error": str(exc)}
+            # Inline mode, or retries exhausted — mark as failed permanently.
+            return {"status": "dead_letter", "error": str(exc)}
 
 
 async def _parse_document(content: bytes, file_type: str, file_name: str) -> tuple[str, int]:
