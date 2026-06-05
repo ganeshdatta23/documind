@@ -49,10 +49,14 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
+    # Managed Postgres (Neon, Supabase, …) requires TLS; mirror the app's DB_SSL
+    # so migrations connect the same way the app does.
+    connect_args = {"ssl": "require"} if settings.DB_SSL else {}
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
