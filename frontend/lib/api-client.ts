@@ -68,7 +68,7 @@ export const documentsClient = {
   list: (params?: DocumentListParams) =>
     apiRequest<PaginatedResponse<DocumentModel>>({
       method: "GET",
-      url: "/documents",
+      url: "/documents/",
       params: params as Record<string, unknown>,
     }),
   get: (id: string) => apiRequest<DocumentModel>({ method: "GET", url: `/documents/${id}` }),
@@ -82,7 +82,7 @@ export const conversationsClient = {
   list: (params?: { page?: number; page_size?: number }) =>
     apiRequest<PaginatedResponse<Conversation>>({
       method: "GET",
-      url: "/conversations",
+      url: "/conversations/",
       params: params as Record<string, unknown>,
     }),
   create: (body: { title?: string; document_ids?: string[] }) =>
@@ -100,7 +100,7 @@ export const conversationsClient = {
 // ── Search ────────────────────────────────────────────────────────────────
 export const searchClient = {
   search: (body: SearchRequest) =>
-    apiRequest<SearchResponse>({ method: "POST", url: "/search", body }),
+    apiRequest<SearchResponse>({ method: "POST", url: "/search/", body }),
 };
 
 // ── Users ─────────────────────────────────────────────────────────────────
@@ -113,12 +113,12 @@ export const usersClient = {
   list: (params?: { page?: number; page_size?: number; is_active?: boolean }) =>
     apiRequest<PaginatedResponse<UserProfile>>({
       method: "GET",
-      url: "/users",
+      url: "/users/",
       params: params as Record<string, unknown>,
     }),
   get: (id: string) => apiRequest<UserProfile>({ method: "GET", url: `/users/${id}` }),
   create: (body: { email: string; password: string; full_name: string; roles?: string[] }) =>
-    apiRequest<UserProfile>({ method: "POST", url: "/users", body }),
+    apiRequest<UserProfile>({ method: "POST", url: "/users/", body }),
 };
 
 export const usersAdminClient = {
@@ -145,17 +145,17 @@ export const tenantClient = {
 
 // ── API keys ────────────────────────────────────────────────────────────────
 export const apiKeysClient = {
-  list: () => apiRequest<{ items: ApiKey[]; total: number }>({ method: "GET", url: "/api-keys" }),
+  list: () => apiRequest<{ items: ApiKey[]; total: number }>({ method: "GET", url: "/api-keys/" }),
   create: (body: { name: string; scopes?: string[]; expires_in_days?: number }) =>
-    apiRequest<ApiKeyCreated>({ method: "POST", url: "/api-keys", body }),
+    apiRequest<ApiKeyCreated>({ method: "POST", url: "/api-keys/", body }),
   revoke: (id: string) => apiRequest<void>({ method: "DELETE", url: `/api-keys/${id}` }),
 };
 
 // ── Webhooks ────────────────────────────────────────────────────────────────
 export const webhooksClient = {
-  list: () => apiRequest<{ items: Webhook[]; total: number }>({ method: "GET", url: "/webhooks" }),
+  list: () => apiRequest<{ items: Webhook[]; total: number }>({ method: "GET", url: "/webhooks/" }),
   create: (body: { name: string; url: string; events: string[] }) =>
-    apiRequest<WebhookCreated>({ method: "POST", url: "/webhooks", body }),
+    apiRequest<WebhookCreated>({ method: "POST", url: "/webhooks/", body }),
   update: (id: string, body: Partial<Pick<Webhook, "name" | "url" | "events" | "is_active">>) =>
     apiRequest<Webhook>({ method: "PATCH", url: `/webhooks/${id}`, body }),
   delete: (id: string) => apiRequest<void>({ method: "DELETE", url: `/webhooks/${id}` }),
@@ -166,7 +166,7 @@ export const auditClient = {
   list: (params?: { page?: number; page_size?: number; action?: string; resource_type?: string }) =>
     apiRequest<PaginatedResponse<AuditLog>>({
       method: "GET",
-      url: "/audit",
+      url: "/audit/",
       params: params as Record<string, unknown>,
     }),
 };

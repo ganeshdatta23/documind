@@ -16,7 +16,7 @@ export function uploadDocument(
 ) {
   return httpClient
     .post<{ id: string; status: string; title: string }>(
-      "/documents",
+      "/documents/",
       formData,
       {
         headers: { "Content-Type": "multipart/form-data" },
