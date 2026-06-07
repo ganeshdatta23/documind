@@ -60,3 +60,5 @@ backend/alembic/versions/*.pyc
 
 # Local agent / tooling state
 .claude/
+docs
+PROJECT_KNOWLEDGE.md
