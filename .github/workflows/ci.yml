@@ -2,9 +2,8 @@ name: CI
 
 # Lean CI matched to the real stack. Deployment is handled automatically by
 # Render (backend) and Vercel (frontend) on push to main — not from here.
-# Gates that must pass: backend type-check (mypy), frontend type-check (tsc),
-# and the backend Docker image build. Linters (ruff/eslint) run but are advisory
-# so pre-existing style debt doesn't block the pipeline.
+# Gates (all must pass): backend lint+type-check (ruff + mypy), frontend
+# lint+type-check (eslint + tsc), and the backend Docker image build.
 
 on:
   push:
@@ -27,11 +26,10 @@ jobs:
           cache: pip
       - name: Install tools
         run: pip install ruff mypy
+      - name: Ruff (lint)
+        run: ruff check .
       - name: Mypy (type check)
         run: mypy . --ignore-missing-imports --exclude alembic
-      - name: Ruff (lint — advisory)
-        run: ruff check .
-        continue-on-error: true
 
   frontend:
     name: Frontend (type-check + lint)
@@ -48,11 +46,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: ESLint
+        run: npm run lint
       - name: TypeScript type check
         run: npx tsc --noEmit
-      - name: ESLint (advisory)
-        run: npm run lint
-        continue-on-error: true
 
   docker-build:
     name: Docker build (backend image)
