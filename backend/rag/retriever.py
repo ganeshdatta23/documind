@@ -1,7 +1,6 @@
 """Hybrid Retriever — Vector search + BM25 + RRF fusion + reranking."""
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 from uuid import UUID
@@ -57,10 +56,14 @@ class HybridRetriever:
         # Embed query
         query_embedding = await self.embedding_client.embed_query(query)
 
-        # Run both searches in parallel
-        vector_results, bm25_results = await asyncio.gather(
-            self._vector_search(query_embedding, tenant_id, document_ids, settings.VECTOR_SEARCH_TOP_K),
-            self._bm25_search(query, tenant_id, document_ids, settings.BM25_SEARCH_TOP_K),
+        # Vector + BM25 run sequentially: they share one AsyncSession, which does
+        # not allow concurrent operations (asyncio.gather here raised
+        # InvalidRequestError: "this session is provisioning a new connection").
+        vector_results = await self._vector_search(
+            query_embedding, tenant_id, document_ids, settings.VECTOR_SEARCH_TOP_K
+        )
+        bm25_results = await self._bm25_search(
+            query, tenant_id, document_ids, settings.BM25_SEARCH_TOP_K
         )
 
         logger.debug(
