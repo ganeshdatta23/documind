@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 from typing import Optional
 from uuid import UUID
@@ -10,7 +9,6 @@ from uuid import UUID
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import settings
 from integrations.ai.embedding_client import EmbeddingClient
 from modules.search.schemas import ChunkResult, SearchResponse
 from rag.retriever import HybridRetriever

@@ -4,7 +4,7 @@ Coordinates: query rewriting → hybrid retrieval → reranking → prompt → s
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import AsyncGenerator, Optional
 from uuid import UUID
 
@@ -12,7 +12,6 @@ import structlog
 from openai import AsyncOpenAI
 
 from config import settings
-from modules.chat.repository import ConversationRepository, MessageRepository
 
 from .citation_engine import Citation, CitationEngine
 from .memory_manager import ConversationMemoryManager

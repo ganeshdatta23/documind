@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import Select, and_, func, select
+from sqlalchemy import Select, select
 
 from models import AuditLog
 

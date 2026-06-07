@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from core.dependencies import CurrentToken, DbSession, RedisConn

@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from core.dependencies import CurrentToken, DbSession, Pagination, SuperAdmin
 from modules.tenant.repository import TenantRepository

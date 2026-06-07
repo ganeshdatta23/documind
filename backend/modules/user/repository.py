@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Role, User
+from models import User
 from queries import count_from
 from queries.users import (
     delete_user_role_associations,

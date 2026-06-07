@@ -172,7 +172,7 @@ class Permission(Base, TimestampMixin):
 
 
 # Junction tables (simple association tables)
-from sqlalchemy import Table, Column
+from sqlalchemy import Table, Column  # noqa: E402  (defined beside its table)
 user_roles_table = Table(
     "user_roles", Base.metadata,
     Column("user_id", PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),

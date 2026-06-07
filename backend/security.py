@@ -129,8 +129,8 @@ def hash_token(token: str) -> str:
 
 # ─── Webhook Signing ──────────────────────────────────────────────────────────
 
-import hmac
-import json
+import hmac  # noqa: E402  (grouped with the webhook-signing helpers)
+import json  # noqa: E402
 
 
 def generate_webhook_secret() -> str:

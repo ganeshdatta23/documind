@@ -5,7 +5,6 @@ Implements the same interface as GCS/S3 clients for easy swapping.
 from __future__ import annotations
 
 import io
-import os
 from pathlib import Path
 from typing import BinaryIO
 

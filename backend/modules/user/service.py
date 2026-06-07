@@ -10,9 +10,7 @@ from core.exceptions import (
     ConflictError,
     NotFoundError,
     PermissionDeniedError,
-    QuotaExceededError,
 )
-from models import Role, User
 from security import hash_password, verify_password
 from modules.user.repository import UserRepository
 from modules.user.schemas import (

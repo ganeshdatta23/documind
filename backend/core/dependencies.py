@@ -13,14 +13,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import settings
-from core.exceptions import (
-    AuthenticationError,
-    InvalidTokenError,
-    PermissionDeniedError,
-    TenantNotFoundError,
-    TokenRevokedError,
-)
 from database import async_session_factory
 from redis_client import get_redis_pool, is_token_blocked
 from security import decode_access_token
@@ -207,7 +199,7 @@ def require_roles(*required_roles: str):
 
 # ─── Pagination ───────────────────────────────────────────────────────────────
 
-from fastapi import Query
+from fastapi import Query  # noqa: E402  (grouped with the pagination helpers)
 
 
 class PaginationParams:

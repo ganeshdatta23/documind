@@ -10,12 +10,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 
-from core.dependencies import CurrentToken, DbSession, Pagination, RedisConn, require_roles
+from core.dependencies import CurrentToken, DbSession, Pagination, RedisConn
 from modules.document.repository import DocumentRepository
 from modules.document.schemas import (
     DocumentListResponse,
     DocumentResponse,
-    DocumentStatusResponse,
     DocumentUpdateRequest,
     DocumentUploadRequest,
 )

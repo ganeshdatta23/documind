@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
-from typing import Optional
 from uuid import UUID, uuid4
 
 import structlog
@@ -14,7 +13,6 @@ from fastapi import UploadFile
 
 from config import settings
 from core.exceptions import (
-    InvalidFileContentError,
     InvalidFileTypeError,
     StorageError,
     StorageQuotaExceededError,

@@ -1,7 +1,6 @@
 """Query rewriter — condenses multi-turn conversation to a standalone question."""
 from __future__ import annotations
 
-from typing import Optional
 
 import structlog
 from openai import AsyncOpenAI

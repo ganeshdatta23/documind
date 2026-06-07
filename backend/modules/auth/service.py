@@ -6,25 +6,20 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Optional
-from uuid import UUID
 
 import structlog
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from core.exceptions import (
     AccountLockedError,
     AuthenticationError,
     InvalidTokenError,
-    TokenRevokedError,
-    UserNotFoundError,
 )
-from models import RefreshToken, User
-from redis_client import SlidingWindowRateLimiter, blocklist_token, is_token_blocked
+from models import User
+from redis_client import blocklist_token
 from security import (
     create_access_token,
     create_refresh_token,
-    decode_access_token,
     hash_token,
     verify_password,
 )

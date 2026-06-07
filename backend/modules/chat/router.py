@@ -8,7 +8,7 @@ import time
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 from config import settings
@@ -169,7 +169,7 @@ async def send_message(
                     total_tokens = event.get("total_tokens", 0)
 
                 yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
-        except Exception as exc:  # surface a clean SSE error frame, never a broken stream
+        except Exception:  # surface a clean SSE error frame, never a broken stream
             logger.exception("chat.stream_failed", conversation_id=str(conv_id))
             yield f"event: error\ndata: {json.dumps({'message': 'Generation failed. Please try again.'})}\n\n"
             answer = answer or "[generation interrupted]"

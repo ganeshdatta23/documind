@@ -7,14 +7,13 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase, MappedColumn
+from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
 from config import settings

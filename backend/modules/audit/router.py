@@ -43,7 +43,7 @@ async def list_audit_logs(
         offset=pagination.offset,
     )
     return AuditLogListResponse(
-        items=[AuditLogResponse.model_validate(l) for l in items],
+        items=[AuditLogResponse.model_validate(row) for row in items],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,

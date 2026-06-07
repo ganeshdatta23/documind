@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import Select, and_, func, select, update
+from sqlalchemy import Select, and_, select, update
 
 from models import Conversation, Message
 

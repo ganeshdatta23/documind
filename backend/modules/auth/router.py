@@ -4,14 +4,11 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from core.dependencies import CurrentToken, DbSession, RedisConn, get_token_data
+from core.dependencies import CurrentToken, DbSession, RedisConn
 from modules.auth.repository import AuthRepository
 from modules.auth.schemas import (
-    ChangePasswordRequest,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,

@@ -10,7 +10,6 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import Select, and_, func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Document, DocumentChunk
 
