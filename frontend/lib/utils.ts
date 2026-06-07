@@ -40,6 +40,17 @@ export function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength - 3) + "...";
 }
 
+/** Pull the backend's error message out of an axios-style error, if present. */
+export function getApiErrorMessage(err: unknown): string | undefined {
+  return (err as { response?: { data?: { error?: { message?: string } } } })
+    ?.response?.data?.error?.message;
+}
+
+/** True when an error is an AbortController cancellation (not a real failure). */
+export function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === "AbortError";
+}
+
 /**
  * Document processing states. Display colors live with the components that
  * render status (via the Badge `tone` system), so this keeps just labels + the

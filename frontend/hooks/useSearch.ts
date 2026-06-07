@@ -7,6 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import { searchClient, type ChunkResult, type SearchRequest } from "@/lib/api-client";
 import { streamSearch } from "@/lib/api";
+import { isAbortError } from "@/lib/utils";
 
 // ─── Standard search mutation ────────────────────────────────────────────────
 
@@ -40,8 +41,8 @@ export function useSearchStream() {
           if (d.latency_ms) setLatencyMs(d.latency_ms);
         }
       }
-    } catch (err: any) {
-      if (err.name !== "AbortError") console.error("Search stream error:", err);
+    } catch (err) {
+      if (!isAbortError(err)) console.error("Search stream error:", err);
     } finally {
       setIsStreaming(false);
     }

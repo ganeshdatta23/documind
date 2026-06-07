@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useLogin } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { getApiErrorMessage } from "@/lib/utils";
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -27,7 +28,7 @@ export default function LoginPage() {
   } = useForm<LoginForm>({ resolver: zodResolver(loginSchema) });
 
   const onSubmit = (data: LoginForm) => login(data);
-  const apiError = (error as any)?.response?.data?.error?.message || "Invalid email or password";
+  const apiError = getApiErrorMessage(error) || "Invalid email or password";
 
   return (
     <div className="w-full max-w-sm">

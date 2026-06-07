@@ -12,7 +12,6 @@ import type {
   ApiKeyCreated,
   AuditLog,
   AuthUser,
-  ChunkResult,
   Conversation,
   DocumentListParams,
   DocumentModel,

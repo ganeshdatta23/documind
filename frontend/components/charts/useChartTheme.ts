@@ -31,6 +31,7 @@ export function useChartTheme(): ChartTheme {
   useEffect(() => {
     const cs = getComputedStyle(document.documentElement);
     const get = (name: string, fb: string) => cs.getPropertyValue(name).trim() || fb;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs theme colors read from the DOM after mount/theme change
     setTheme({
       accent: get("--accent", FALLBACK.accent),
       grid: get("--line", FALLBACK.grid),

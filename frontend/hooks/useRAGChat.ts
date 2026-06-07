@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { streamChatMessage } from "@/lib/api";
 import type { Citation } from "@/lib/api-client";
+import { getApiErrorMessage, isAbortError } from "@/lib/utils";
 import { conversationKeys } from "./useConversations";
 
 export interface StreamingMessage {
@@ -102,9 +103,10 @@ export function useRAGChat(conversationId: string) {
         }
 
         qc.invalidateQueries({ queryKey: conversationKeys.messages(conversationId) });
-      } catch (err: any) {
-        if (err.name !== "AbortError") {
-          const msg = err.message || "Something went wrong";
+      } catch (err) {
+        if (!isAbortError(err)) {
+          const msg = getApiErrorMessage(err)
+            || (err instanceof Error ? err.message : "Something went wrong");
           setError(msg);
           setMessages((prev) => {
             const updated = [...prev];

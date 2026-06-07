@@ -24,18 +24,23 @@ export const API_BASE_URL = `${API_ORIGIN}/api/v1`;
 /** In-memory token key — NOT stored in localStorage (XSS protection) */
 export const TOKEN_KEY = "__DOCUMIND_TOKEN__";
 
+// Typed handle for the in-memory token kept on `window` (shared across the bundle).
+declare global {
+  interface Window {
+    __DOCUMIND_TOKEN__?: string;
+  }
+}
+
 export function getToken(): string {
-  return typeof window !== "undefined"
-    ? ((window as any)[TOKEN_KEY] as string | undefined) ?? ""
-    : "";
+  return typeof window !== "undefined" ? window.__DOCUMIND_TOKEN__ ?? "" : "";
 }
 
 export function setToken(token: string) {
-  if (typeof window !== "undefined") (window as any)[TOKEN_KEY] = token;
+  if (typeof window !== "undefined") window.__DOCUMIND_TOKEN__ = token;
 }
 
 export function clearToken() {
-  if (typeof window !== "undefined") (window as any)[TOKEN_KEY] = undefined;
+  if (typeof window !== "undefined") window.__DOCUMIND_TOKEN__ = undefined;
 }
 
 // ─── Axios instance ───────────────────────────────────────────────────────────

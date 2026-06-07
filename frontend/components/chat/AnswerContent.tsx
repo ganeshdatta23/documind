@@ -6,7 +6,6 @@
  * **bold**, *italic*, simple "- " bullet lists, and [N] citation references.
  */
 import { Fragment, type ReactNode } from "react";
-import type { Citation } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
 function renderInline(text: string, onCite?: (index: number) => void, keyBase = ""): ReactNode[] {

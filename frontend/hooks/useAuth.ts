@@ -40,7 +40,7 @@ export function useLogin() {
     onSuccess: (response) => {
       // Store token in memory for HTTP client
       if (typeof window !== "undefined") {
-        (window as any).__DOCUMIND_TOKEN__ = response.access_token;
+        window.__DOCUMIND_TOKEN__ = response.access_token;
       }
       setAuth(response.user, response.access_token);
       qc.clear();
@@ -60,7 +60,7 @@ export function useLogout() {
     mutationFn: () => authClient.logout(),
     onSettled: () => {
       if (typeof window !== "undefined") {
-        (window as any).__DOCUMIND_TOKEN__ = undefined;
+        window.__DOCUMIND_TOKEN__ = undefined;
       }
       clearAuth();
       qc.clear();

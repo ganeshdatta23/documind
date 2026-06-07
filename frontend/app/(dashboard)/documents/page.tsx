@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { UploadCloud, FileText, Search, Trash2, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { useDocuments, useUploadDocument, useDeleteDocument } from "@/hooks/useDocuments";
-import { formatBytes, formatRelativeTime, cn } from "@/lib/utils";
+import { formatBytes, formatRelativeTime, cn, getApiErrorMessage } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -112,8 +112,8 @@ export default function DocumentsPage() {
           await uploadDoc({ formData: fd, onProgress: (pct) => setUploads((prev) => prev.map((u, idx) => (idx === i ? { ...u, progress: pct } : u))) });
           setUploads((prev) => prev.map((u, idx) => (idx === i ? { ...u, status: "done", progress: 100 } : u)));
           setTimeout(() => setUploads((prev) => prev.filter((_, idx) => idx !== i)), 3000);
-        } catch (err: any) {
-          setUploads((prev) => prev.map((u, idx) => idx === i ? { ...u, status: "error", error: err.response?.data?.error?.message ?? "Upload failed" } : u));
+        } catch (err) {
+          setUploads((prev) => prev.map((u, idx) => idx === i ? { ...u, status: "error", error: getApiErrorMessage(err) ?? "Upload failed" } : u));
         }
       }
     },

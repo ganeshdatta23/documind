@@ -6,7 +6,7 @@
  */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { setToken, clearToken, TOKEN_KEY } from "@/lib/http-client";
+import { setToken, clearToken } from "@/lib/http-client";
 
 export interface AuthUser {
   id: string;
