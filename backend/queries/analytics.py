@@ -29,11 +29,13 @@ def select_document_counts_by_status(tenant_id: UUID) -> Select:
 def select_daily_upload_counts(tenant_id: UUID, days: int = 30) -> Select:
     """Daily document upload counts for the last N days (activity chart)."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
+    # Build the date_trunc expression ONCE and reuse it across select/group_by/
+    # order_by. Calling it three times emits three separate bind params, so
+    # Postgres won't recognize them as the same expression and raises a GROUP BY
+    # error ("column documents.created_at must appear in the GROUP BY clause").
+    day = func.date_trunc("day", Document.created_at)
     return (
-        select(
-            func.date_trunc("day", Document.created_at).label("day"),
-            func.count(Document.id).label("cnt"),
-        )
+        select(day.label("day"), func.count(Document.id).label("cnt"))
         .where(
             and_(
                 Document.tenant_id == tenant_id,
@@ -41,8 +43,8 @@ def select_daily_upload_counts(tenant_id: UUID, days: int = 30) -> Select:
                 Document.deleted_at.is_(None),
             )
         )
-        .group_by(func.date_trunc("day", Document.created_at))
-        .order_by(func.date_trunc("day", Document.created_at))
+        .group_by(day)
+        .order_by(day)
     )
 
 
